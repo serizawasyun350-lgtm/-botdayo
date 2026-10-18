@@ -31,6 +31,20 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix='/', intents=intents)
 
+# ユーザーごとの所持金を保持する辞書 (簡易的なメモリ保存)
+# 初期所持金: 3,000 まるもね
+user_balance = {}
+
+
+def get_balance(user_id: int) -> int:
+  if user_id not in user_balance:
+    user_balance[user_id] = 3000  # 初期ボーナス
+  return user_balance[user_id]
+
+
+def add_balance(user_id: int, amount: int):
+  user_balance[user_id] = get_balance(user_id) + amount
+
 
 @bot.event
 async def on_ready():
@@ -42,15 +56,14 @@ async def on_ready():
     print(f'同期エラーが発生しました: {e}')
 
 
-# --- 3. ボタン式スロットパネル (自分だけが操作可能 & 上書き更新対応) ---
+# --- 3. ボタン式スロットパネル (1回 1,000 まるもね) ---
 class SlotPanelView(discord.ui.View):
 
   def __init__(self, author: discord.User | discord.Member):
     super().__init__(timeout=180)
-    self.author = author  # コマンドを実行したユーザーを保存
+    self.author = author
 
   async def interaction_check(self, interaction: discord.Interaction) -> bool:
-    # ボタンを押したユーザーが実行者本人かチェック
     if interaction.user.id != self.author.id:
       await interaction.response.send_message(
           '⚠️ このスロットパネルは実行した本人だけが操作できます！',
@@ -60,45 +73,65 @@ class SlotPanelView(discord.ui.View):
     return True
 
   @discord.ui.button(
-      label='🎰 パネルを回す！',
+      label='🎰 パネルを回す！ (1,000まるもね)',
       style=discord.ButtonStyle.danger,
       custom_id='spin_slot_button',
   )
   async def spin_button(
       self, interaction: discord.Interaction, button: discord.ui.Button
   ):
+    cost = 1000
+    current_money = get_balance(interaction.user.id)
+
+    # 所持金チェック
+    if current_money < cost:
+      await interaction.response.send_message(
+          f'⚠️ まるもねが足りません！（所持金: {current_money:,} まるもね / 必要: {cost:,} まるもね）\n`/work` コマンドでお仕事を稼いできてね！',
+          ephemeral=True,
+      )
+      return
+
+    # 参加費の支払い
+    add_balance(interaction.user.id, -cost)
+
     emojis = ['🍒', '🍋', '🔔', '⭐', '💎', '7️⃣']
     res = [random.choice(emojis) for _ in range(3)]
     panel_display = f'| {res[0]} | {res[1]} | {res[2]} |'
 
     # 配当判定
+    prize = 0
     if res[0] == res[1] == res[2]:
       if res[0] == '7️⃣':
         prize = 100000
-        msg = f'🎉 **超ジャックポット！！777達成！**\n💰 **{prize:,} まるもね** 獲得！'
+        msg = f'🎉 **超ジャックポット！！777達成！**\n💰 **+{prize:,} まるもね** 獲得！'
       else:
         prize = 50000
-        msg = f'🎉 **ジャックポット達成！**\n💰 **{prize:,} まるもね** 獲得！'
+        msg = f'🎉 **ジャックポット達成！**\n💰 **+{prize:,} まるもね** 獲得！'
     elif res[0] == res[1] or res[1] == res[2] or res[0] == res[2]:
       prize = 5000
-      msg = f'✨ **2つ揃いました！**\n💰 **{prize:,} まるもね** 獲得！'
+      msg = f'✨ **2つ揃いました！**\n💰 **+{prize:,} まるもね** 獲得！'
     else:
       msg = '😢 残念！ハズレです…もう一度挑戦してね！'
+
+    if prize > 0:
+      add_balance(interaction.user.id, prize)
+
+    new_balance = get_balance(interaction.user.id)
 
     embed = discord.Embed(
         title='🎰 スロットパネルを設置しました！',
         description=(
             f'```\n{panel_display}\n```\n{msg}\n\n'
+            f'👛 **現在の所持金:** {new_balance:,} まるもね\n'
             'もう一度回す場合は下のボタンを押してね！'
         ),
         color=discord.Color.gold(),
     )
 
-    # 直前のメッセージをそのまま上書き更新
     await interaction.response.edit_message(embed=embed, view=self)
 
 
-# --- 4. ボタン式ガチャ (自分だけが操作可能) ---
+# --- 4. ボタン式ガチャ (1回 300 まるもね) ---
 class GachaView(discord.ui.View):
 
   def __init__(self, author: discord.User | discord.Member):
@@ -114,13 +147,25 @@ class GachaView(discord.ui.View):
     return True
 
   @discord.ui.button(
-      label='✨ ガチャを回す！',
+      label='✨ ガチャを回す！ (300まるもね)',
       style=discord.ButtonStyle.blurple,
       custom_id='gacha_button',
   )
   async def button_callback(
       self, interaction: discord.Interaction, button: discord.ui.Button
   ):
+    cost = 300
+    current_money = get_balance(interaction.user.id)
+
+    if current_money < cost:
+      await interaction.response.send_message(
+          f'⚠️ まるもねが足りません！（所持金: {current_money:,} まるもね / 必要: {cost:,} まるもね）\n`/work` コマンドでお仕事をしてね！',
+          ephemeral=True,
+      )
+      return
+
+    add_balance(interaction.user.id, -cost)
+
     rarity, weight = random.choices(
         [
             ('SSR', 3),
@@ -140,13 +185,15 @@ class GachaView(discord.ui.View):
     }
 
     item, money = rewards[rarity]
+    add_balance(interaction.user.id, money)
+    new_balance = get_balance(interaction.user.id)
 
     embed = discord.Embed(
         title='🎰 まるちき鯖 ガチャ会場',
         description=(
             f'🎁 ガチャ結果: **[{rarity}] {item}**\n'
-            f'💰 獲得賞金: **{money:,} まるもね** ゲット！\n\n'
-            'もう一度引く場合は下のボタンを押してね！'
+            f'💰 賞金: **+{money:,} まるもね** ゲット！\n\n'
+            f'👛 **現在の所持金:** {new_balance:,} まるもね'
         ),
         color=discord.Color.blue(),
     )
@@ -154,7 +201,7 @@ class GachaView(discord.ui.View):
     await interaction.response.edit_message(embed=embed, view=self)
 
 
-# --- 5. ボタン式くじ引き (自分だけが操作可能) ---
+# --- 5. ボタン式くじ引き (1回 500 まるもね) ---
 class KujibikiView(discord.ui.View):
 
   def __init__(self, author: discord.User | discord.Member):
@@ -170,13 +217,25 @@ class KujibikiView(discord.ui.View):
     return True
 
   @discord.ui.button(
-      label='🎯 くじを引く！',
+      label='🎯 くじを引く！ (500まるもね)',
       style=discord.ButtonStyle.green,
       custom_id='kujibiki_button',
   )
   async def button_callback(
       self, interaction: discord.Interaction, button: discord.ui.Button
   ):
+    cost = 500
+    current_money = get_balance(interaction.user.id)
+
+    if current_money < cost:
+      await interaction.response.send_message(
+          f'⚠️ まるもねが足りません！（所持金: {current_money:,} まるもね / 必要: {cost:,} まるもね）\n`/work` コマンドでお仕事をしてね！',
+          ephemeral=True,
+      )
+      return
+
+    add_balance(interaction.user.id, -cost)
+
     fortunes = [
         ('🌟 特賞：まるちき鯖の主！', 100000),
         ('💎 大当たり：激レア！', 50000),
@@ -187,13 +246,15 @@ class KujibikiView(discord.ui.View):
         ('💀 ざんねん：ハズレ…', 0),
     ]
     result_text, money = random.choice(fortunes)
+    add_balance(interaction.user.id, money)
+    new_balance = get_balance(interaction.user.id)
 
     embed = discord.Embed(
         title='🎁 まるちき鯖 くじ引き会場',
         description=(
             f'🎟️ くじの結果: **{result_text}**\n'
-            f'💰 獲得賞金: **{money:,} まるもね** ゲット！\n\n'
-            'もう一度引く場合は下のボタンを押してね！'
+            f'💰 賞金: **+{money:,} まるもね** ゲット！\n\n'
+            f'👛 **現在の所持金:** {new_balance:,} まるもね'
         ),
         color=discord.Color.green(),
     )
@@ -204,9 +265,21 @@ class KujibikiView(discord.ui.View):
 # --- 6. メインゲーム & work コマンド ---
 
 
+@bot.tree.command(
+    name='balance', description='現在の「まるもね」所持金を確認します'
+)
+async def balance(interaction: discord.Interaction):
+  money = get_balance(interaction.user.id)
+  await interaction.response.send_message(
+      f'👛 {interaction.user.mention} さんの所持金: **{money:,} まるもね**',
+      ephemeral=True,
+  )
+
+
 @bot.tree.command(name='slot', description='スロットパネルを回して大金を狙おう！')
 async def slot(interaction: discord.Interaction):
   view = SlotPanelView(author=interaction.user)
+  money = get_balance(interaction.user.id)
   embed = discord.Embed(
       title='🎰 スロットパネルを設置しました！',
       description=(
@@ -214,20 +287,26 @@ async def slot(interaction: discord.Interaction):
           '7️⃣ 7️⃣ 7️⃣ : **100,000 まるもね**\n'
           '💎 💎 💎 : **50,000 まるもね**\n'
           '2つ一致 : **5,000 まるもね**\n\n'
-          '下の「🎰 パネルを回す！」ボタンを押してスタートしてね！'
+          '🪙 プレイ料金: **1回 1,000 まるもね**\n'
+          f'👛 あなたの所持金: **{money:,} まるもね**\n\n'
+          '下のボタンを押してスタートしてね！'
       ),
       color=discord.Color.gold(),
   )
-  # 自分だけに表示
   await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 @bot.tree.command(name='gacha', description='ボタンを押して装備ガチャを引きます！')
 async def gacha(interaction: discord.Interaction):
   view = GachaView(author=interaction.user)
+  money = get_balance(interaction.user.id)
   embed = discord.Embed(
       title='🎰 まるちき鯖 ガチャ会場',
-      description='下のボタンを押してガチャを引いてね！',
+      description=(
+          '🪙 プレイ料金: **1回 300 まるもね**\n'
+          f'👛 あなたの所持金: **{money:,} まるもね**\n\n'
+          '下のボタンを押してガチャを引いてね！'
+      ),
       color=discord.Color.blue(),
   )
   await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
@@ -236,9 +315,14 @@ async def gacha(interaction: discord.Interaction):
 @bot.tree.command(name='kujibiki', description='ボタンを押してくじ引きをします！')
 async def kujibiki(interaction: discord.Interaction):
   view = KujibikiView(author=interaction.user)
+  money = get_balance(interaction.user.id)
   embed = discord.Embed(
       title='🎁 まるちき鯖 くじ引き会場',
-      description='下のボタンを押して運試しをしよう！',
+      description=(
+          '🪙 プレイ料金: **1回 500 まるもね**\n'
+          f'👛 あなたの所持金: **{money:,} まるもね**\n\n'
+          '下のボタンを押して運試しをしよう！'
+      ),
       color=discord.Color.green(),
   )
   await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
@@ -257,8 +341,14 @@ async def work(interaction: discord.Interaction):
   ]
   job_name, min_earn, max_earn = random.choice(jobs)
   earned = random.randint(min_earn, max_earn)
+
+  add_balance(interaction.user.id, earned)
+  current_money = get_balance(interaction.user.id)
+
   await interaction.response.send_message(
-      f'💼 お仕事「{job_name}」を頑張った！\n💰 報酬として **{earned:,} まるもね** をゲット！🎉'
+      f'💼 お仕事「{job_name}」を頑張った！\n'
+      f'💰 報酬として **+{earned:,} まるもね** をゲット！🎉\n'
+      f'👛 現在の所持金: **{current_money:,} まるもね**'
   )
 
 
@@ -293,7 +383,9 @@ async def rps(interaction: discord.Interaction, hand: app_commands.Choice[str]):
       or (user_hand == 'チョキ' and bot_hand == 'パー')
       or (user_hand == 'パー' and bot_hand == 'グー')
   ):
-    result = 'あなたの勝ち！🎉 (10,000まるもね)'
+    prize = 10000
+    add_balance(interaction.user.id, prize)
+    result = f'あなたの勝ち！🎉 (💰 +{prize:,} まるもね 獲得！)'
   else:
     result = 'Botの勝ち！🤖'
   await interaction.response.send_message(
@@ -440,8 +532,9 @@ def register_mini_game(name, desc, title, choices):
   async def dynamic_mini_cmd(interaction: discord.Interaction):
     bonus_money = random.choice([100, 500, 1000, 5000, 10000])
     choice_result = random.choice(choices)
+    add_balance(interaction.user.id, bonus_money)
     await interaction.response.send_message(
-        f'{title}: **{choice_result}**\n💰 報酬: **{bonus_money:,} まるもね**'
+        f'{title}: **{choice_result}**\n💰 報酬: **+{bonus_money:,} まるもね**'
     )
 
 
