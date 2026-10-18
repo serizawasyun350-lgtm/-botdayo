@@ -1,10 +1,12 @@
 import os
 import random
 import threading
+import time
 import discord
 from discord import app_commands
 from discord.ext import commands
 from flask import Flask
+import psutil
 
 # --- 1. UptimeRobot用のWebサーバー (Renderのスリープ防止用) ---
 app = Flask('')
@@ -31,14 +33,13 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix='/', intents=intents)
 
-# ユーザーごとの所持金を保持する辞書 (簡易的なメモリ保存)
-# 初期所持金: 3,000 まるもね
+# ユーザーごとの所持金を保持する辞書 (初期値: 3,000 まるもね)
 user_balance = {}
 
 
 def get_balance(user_id: int) -> int:
   if user_id not in user_balance:
-    user_balance[user_id] = 3000  # 初期ボーナス
+    user_balance[user_id] = 3000
   return user_balance[user_id]
 
 
@@ -56,7 +57,145 @@ async def on_ready():
     print(f'同期エラーが発生しました: {e}')
 
 
-# --- 3. ボタン式スロットパネル (1回 1,000 まるもね) ---
+# --- 3. ステータス表示用 View クラス ---
+class StatusView(discord.ui.View):
+
+  def __init__(self, bot_instance):
+    super().__init__(timeout=180)
+    self.bot = bot_instance
+
+  @discord.ui.button(
+      label='🔄 ステータスを更新',
+      style=discord.ButtonStyle.secondary,
+      custom_id='refresh_status_button',
+  )
+  async def refresh_button(
+      self, interaction: discord.Interaction, button: discord.ui.Button
+  ):
+    # Ping
+    latency = round(self.bot.latency * 1000)
+
+    # メモリ (RAM) & CPU 使用量
+    process = psutil.Process(os.getpid())
+    ram_mb = process.memory_info().rss / 1024 / 1024
+    cpu_percent = psutil.cpu_percent()
+
+    embed = discord.Embed(
+        title='⚙️ Bot ステータス情報',
+        color=discord.Color.blue(),
+    )
+    embed.add_field(name='🏓 応答速度 (Ping)', value=f'`{latency} ms`', inline=True)
+    embed.add_field(
+        name='💾 RAM 使用量', value=f'`{ram_mb:.2f} MB`', inline=True
+    )
+    embed.add_field(
+        name='🖥️ CPU 使用率', value=f'`{cpu_percent:.1f} %`', inline=True
+    )
+    embed.add_field(
+        name='🌐 参加サーバー数',
+        value=f'`{len(self.bot.guilds)}` サーバー',
+        inline=False,
+    )
+    embed.set_footer(text='ボタンを押すと最新のステータスに更新されます')
+
+    await interaction.response.edit_message(embed=embed, view=self)
+
+
+# --- 4. 所持金確認 & ランキング & ステータスコマンド ---
+
+
+@bot.tree.command(
+    name='balance',
+    description='自分または指定したメンバーの「まるもね」を確認します',
+)
+@app_commands.describe(
+    target='所持金を確認したいメンバー（未入力なら自分を表示）'
+)
+async def balance(
+    interaction: discord.Interaction, target: discord.Member = None
+):
+  user = target or interaction.user
+  money = get_balance(user.id)
+
+  if user == interaction.user:
+    await interaction.response.send_message(
+        f'👛 {user.mention} さんの現在の所持金: **{money:,} まるもね**',
+        ephemeral=True,
+    )
+  else:
+    await interaction.response.send_message(
+        f'👛 {user.mention} さんの現在の所持金: **{money:,} まるもね**'
+    )
+
+
+@bot.tree.command(
+    name='marumone-okanemotirannkinngu',
+    description='まるもね所持金ランキングTOP10を表示します',
+)
+async def okanemoti_ranking(interaction: discord.Interaction):
+  if not user_balance:
+    await interaction.response.send_message(
+        '💰 まだデータが存在しません！', ephemeral=True
+    )
+    return
+
+  # 所持金が多い順にソート
+  sorted_users = sorted(
+      user_balance.items(), key=lambda item: item[1], reverse=True
+  )
+
+  ranking_text = ''
+  medals = ['🥇', '🥈', '🥉']
+
+  for rank, (user_id, money) in enumerate(sorted_users[:10], start=1):
+    medal = medals[rank - 1] if rank <= 3 else f'**{rank}位**'
+    ranking_text += f'{medal} <@{user_id}> : **{money:,} まるもね**\n'
+
+  embed = discord.Embed(
+      title='🏆 まるちき鯖 お金持ちランキング TOP10',
+      description=ranking_text,
+      color=discord.Color.gold(),
+  )
+  embed.set_footer(text='※お金が増減すると自動で順位が自動更新されます')
+
+  await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(
+    name='status', description='BotのPing値、RAM使用量、CPU情報等を確認します'
+)
+async def status(interaction: discord.Interaction):
+  latency = round(bot.latency * 1000)
+  process = psutil.Process(os.getpid())
+  ram_mb = process.memory_info().rss / 1024 / 1024
+  cpu_percent = psutil.cpu_percent()
+
+  view = StatusView(bot_instance=bot)
+
+  embed = discord.Embed(
+      title='⚙️ Bot ステータス情報',
+      color=discord.Color.blue(),
+  )
+  embed.add_field(name='🏓 応答速度 (Ping)', value=f'`{latency} ms`', inline=True)
+  embed.add_field(
+      name='💾 RAM 使用量', value=f'`{ram_mb:.2f} MB`', inline=True
+  )
+  embed.add_field(
+      name='🖥️ CPU 使用率', value=f'`{cpu_percent:.1f} %`', inline=True
+  )
+  embed.add_field(
+      name='🌐 参加サーバー数',
+      value=f'`{len(bot.guilds)}` サーバー',
+      inline=False,
+  )
+  embed.set_footer(text='ボタンを押すと最新のステータスに更新されます')
+
+  await interaction.response.send_message(
+      embed=embed, view=view, ephemeral=True
+  )
+
+
+# --- 5. ボタン式スロットパネル (1回 1,000 まるもね) ---
 class SlotPanelView(discord.ui.View):
 
   def __init__(self, author: discord.User | discord.Member):
@@ -83,27 +222,28 @@ class SlotPanelView(discord.ui.View):
     cost = 1000
     current_money = get_balance(interaction.user.id)
 
-    # 所持金チェック
     if current_money < cost:
       await interaction.response.send_message(
-          f'⚠️ まるもねが足りません！（所持金: {current_money:,} まるもね / 必要: {cost:,} まるもね）\n`/work` コマンドでお仕事を稼いできてね！',
+          f'⚠️ まるもねが足りません！（所持金: {current_money:,} まるもね / 必要:'
+          f' {cost:,} まるもね）\n`/work` コマンドでお仕事を稼いできてね！',
           ephemeral=True,
       )
       return
 
-    # 参加費の支払い
     add_balance(interaction.user.id, -cost)
 
     emojis = ['🍒', '🍋', '🔔', '⭐', '💎', '7️⃣']
     res = [random.choice(emojis) for _ in range(3)]
     panel_display = f'| {res[0]} | {res[1]} | {res[2]} |'
 
-    # 配当判定
     prize = 0
     if res[0] == res[1] == res[2]:
       if res[0] == '7️⃣':
         prize = 100000
-        msg = f'🎉 **超ジャックポット！！777達成！**\n💰 **+{prize:,} まるもね** 獲得！'
+        msg = (
+            '🎉 **超ジャックポット！！777達成！**\n💰'
+            f' **+{prize:,} まるもね** 獲得！'
+        )
       else:
         prize = 50000
         msg = f'🎉 **ジャックポット達成！**\n💰 **+{prize:,} まるもね** 獲得！'
@@ -131,7 +271,7 @@ class SlotPanelView(discord.ui.View):
     await interaction.response.edit_message(embed=embed, view=self)
 
 
-# --- 4. ボタン式ガチャ (1回 300 まるもね) ---
+# --- 6. ボタン式ガチャ (1回 300 まるもね) ---
 class GachaView(discord.ui.View):
 
   def __init__(self, author: discord.User | discord.Member):
@@ -159,7 +299,8 @@ class GachaView(discord.ui.View):
 
     if current_money < cost:
       await interaction.response.send_message(
-          f'⚠️ まるもねが足りません！（所持金: {current_money:,} まるもね / 必要: {cost:,} まるもね）\n`/work` コマンドでお仕事をしてね！',
+          f'⚠️ まるもねが足りません！（所持金: {current_money:,} まるもね / 必要:'
+          f' {cost:,} まるもね）\n`/work` コマンドでお仕事をしてね！',
           ephemeral=True,
       )
       return
@@ -201,7 +342,7 @@ class GachaView(discord.ui.View):
     await interaction.response.edit_message(embed=embed, view=self)
 
 
-# --- 5. ボタン式くじ引き (1回 500 まるもね) ---
+# --- 7. ボタン式くじ引き (1回 500 まるもね) ---
 class KujibikiView(discord.ui.View):
 
   def __init__(self, author: discord.User | discord.Member):
@@ -229,7 +370,8 @@ class KujibikiView(discord.ui.View):
 
     if current_money < cost:
       await interaction.response.send_message(
-          f'⚠️ まるもねが足りません！（所持金: {current_money:,} まるもね / 必要: {cost:,} まるもね）\n`/work` コマンドでお仕事をしてね！',
+          f'⚠️ まるもねが足りません！（所持金: {current_money:,} まるもね / 必要:'
+          f' {cost:,} まるもね）\n`/work` コマンドでお仕事をしてね！',
           ephemeral=True,
       )
       return
@@ -262,18 +404,7 @@ class KujibikiView(discord.ui.View):
     await interaction.response.edit_message(embed=embed, view=self)
 
 
-# --- 6. メインゲーム & work コマンド ---
-
-
-@bot.tree.command(
-    name='balance', description='現在の「まるもね」所持金を確認します'
-)
-async def balance(interaction: discord.Interaction):
-  money = get_balance(interaction.user.id)
-  await interaction.response.send_message(
-      f'👛 {interaction.user.mention} さんの所持金: **{money:,} まるもね**',
-      ephemeral=True,
-  )
+# --- 8. メインゲーム & work コマンド ---
 
 
 @bot.tree.command(name='slot', description='スロットパネルを回して大金を狙おう！')
@@ -393,7 +524,7 @@ async def rps(interaction: discord.Interaction, hand: app_commands.Choice[str]):
   )
 
 
-# --- 7. 89個のミニゲーム・診断コマンド群 ---
+# --- 9. 89個のミニゲーム・診断コマンド群 ---
 mini_games_89 = {
     'game1': ('的当てゲーム', '🎯 的当て', ['中央命中！', '惜しくも外れ', 'かすり傷']),
     'game2': ('ボウリング', '🎳 ボウリング', ['ストライク！', 'スペア！', 'ガター…']),
@@ -542,7 +673,7 @@ for cmd_name, (desc, title, choices) in mini_games_89.items():
   register_mini_game(cmd_name, desc, title, choices)
 
 
-# --- 8. ボット起動 ---
+# --- 10. ボット起動 ---
 if __name__ == '__main__':
   keep_alive()
   TOKEN = os.environ.get('DISCORD_BOT_TOKEN')
