@@ -116,7 +116,7 @@ class SlotPanelView(discord.ui.View):
         msg = f'🎉 **ジャックポット達成！**\n💰 **+{prize:,} まるもね** 獲得！'
     elif res[0] == res[1] or res[1] == res[2] or res[0] == res[2]:
       prize = 5000
-      msg = f'✨ **2つ揃いました！**\n💰 **+{prize:,} まるもね** 獲得！'
+      msg = f'✨ **2つ揃えました！**\n💰 **+{prize:,} まるもね** 獲得！'
     else:
       msg = '😢 残念！ハズレです…もう一度挑戦してね！'
 
@@ -138,7 +138,7 @@ class SlotPanelView(discord.ui.View):
     await interaction.response.edit_message(embed=embed, view=self)
 
 
-# --- 4. ステータス表示 View クラス（1秒ごとに自動更新するループ対応） ---
+# --- 4. ステータス表示 View クラス（ボタンなし・1秒自動更新ループ） ---
 class StatusView(discord.ui.View):
 
   def __init__(self, bot_instance, message_to_edit=None):
@@ -202,48 +202,6 @@ class StatusView(discord.ui.View):
         await self.message.edit(view=self)
     except Exception:
       pass
-
-  @discord.ui.button(
-      label='🔄 今すぐ手動更新',
-      style=discord.ButtonStyle.secondary,
-      custom_id='refresh_status_button',
-  )
-  async def refresh_button(
-      self, interaction: discord.Interaction, button: discord.ui.Button
-  ):
-    latency = round(self.bot.latency * 1000)
-    process = psutil.Process(os.getpid())
-    ram_mb = process.memory_info().rss / 1024 / 1024
-    cpu_percent = psutil.cpu_percent()
-
-    uptime_seconds = int(time.time() - bot_start_time)
-    days = uptime_seconds // 86400
-    hours = (uptime_seconds % 86400) // 3600
-    minutes = (uptime_seconds % 3600) // 60
-    seconds = uptime_seconds % 60
-
-    if days > 0:
-      uptime_str = f'`{days}日 {hours}時間 {minutes}分 {seconds}秒`'
-    else:
-      uptime_str = f'`{hours}時間 {minutes}分 {seconds}秒`'
-
-    embed = discord.Embed(title='⚙️ Bot ステータス情報', color=discord.Color.blue())
-    embed.add_field(name='⏱️ 稼働時間 (Uptime)', value=uptime_str, inline=False)
-    embed.add_field(name='🏓 応答速度 (Ping)', value=f'`{latency} ms`', inline=True)
-    embed.add_field(
-        name='💾 RAM 使用量', value=f'`{ram_mb:.2f} MB`', inline=True
-    )
-    embed.add_field(
-        name='🖥️ CPU 使用率', value=f'`{cpu_percent:.1f} %`', inline=True
-    )
-    embed.add_field(
-        name='🌐 参加サーバー数',
-        value=f'`{len(self.bot.guilds)}` サーバー',
-        inline=False,
-    )
-    embed.set_footer(text='🟢 1秒ごとにリアルタイム更新中...')
-
-    await interaction.response.edit_message(embed=embed, view=self)
 
 
 # --- 5. ガチャ & くじ引き View クラス ---
@@ -520,7 +478,7 @@ async def balance(
 
   if user == interaction.user:
     await interaction.response.send_message(
-        f'👛 {user.mention} さんの現在の所持金: **{money:,} まるもね**',
+        f'👛 あなたの現在の所持金: **{money:,} まるもね**',
         ephemeral=True,
     )
   else:
@@ -532,13 +490,9 @@ async def balance(
 # Botステータスコマンド（みんなに見える公開表示 ＆ 1秒ごと自動更新）
 @bot.tree.command(
     name='status',
-    description='Botの稼働時間(Uptime)やPing値をみんなに見えるように1秒ごとに自動更新します',
+    description='Botのステータスを表示させました！(1秒ごとに自動更新)',
 )
 async def status(interaction: discord.Interaction):
-  # ご要望の「ステータスを表示させました」を先に送信、またはdeferで公開メッセージとして送信
-  await interaction.response.defer(ephemeral=False)
-  await interaction.followup.send('⚙️ ステータスを表示させました！', ephemeral=False)
-
   latency = round(bot.latency * 1000)
   process = psutil.Process(os.getpid())
   ram_mb = process.memory_info().rss / 1024 / 1024
@@ -569,24 +523,21 @@ async def status(interaction: discord.Interaction):
       value=f'`{len(bot.guilds)}` サーバー',
       inline=False,
   )
-  embed.set_footer(text='🟢 1秒ごとにリアルタイム更新中...')
+  embed.set_footer(text='🟢 ステータスを表示させました！ (1秒ごとに自動更新中...)')
 
-  message = await interaction.followup.send(embed=embed, ephemeral=False)
+  await interaction.response.send_message(embed=embed, ephemeral=False)
+  message = await interaction.original_response()
+
   StatusView(bot_instance=bot, message_to_edit=message)
 
 
 # 管理者専用ステータスコマンド（自動1秒更新つき）
 @bot.tree.command(
     name='admin-status',
-    description='【管理者用】Botの詳細ステータスをみんなに公開し、1秒ごとに自動更新します',
+    description='【管理者用】Botの詳細ステータスを表示させます(1秒ごとに自動更新)',
 )
 @app_commands.checks.has_permissions(administrator=True)
 async def admin_status(interaction: discord.Interaction):
-  await interaction.response.defer(ephemeral=False)
-  await interaction.followup.send(
-      '🛡️ 【管理者用】リアルタイムステータスを表示させました！', ephemeral=False
-  )
-
   latency = round(bot.latency * 1000)
   process = psutil.Process(os.getpid())
   ram_mb = process.memory_info().rss / 1024 / 1024
@@ -620,9 +571,13 @@ async def admin_status(interaction: discord.Interaction):
       value=f'`{len(bot.guilds)}` サーバー',
       inline=False,
   )
-  embed.set_footer(text='👑 管理者専用 | 1秒ごとに自動更新中...')
+  embed.set_footer(
+      text='👑 管理者専用 | ステータスを表示させました！ (1秒ごとに自動更新中...)'
+  )
 
-  message = await interaction.followup.send(embed=embed, ephemeral=False)
+  await interaction.response.send_message(embed=embed, ephemeral=False)
+  message = await interaction.original_response()
+
   StatusView(bot_instance=bot, message_to_edit=message)
 
 
