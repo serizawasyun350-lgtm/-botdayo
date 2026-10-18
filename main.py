@@ -42,11 +42,22 @@ async def on_ready():
     print(f'同期エラーが発生しました: {e}')
 
 
-# --- 3. ボタン式スロットパネルのViewクラス ---
+# --- 3. ボタン式スロットパネル (自分だけが操作可能 & 上書き更新対応) ---
 class SlotPanelView(discord.ui.View):
 
-  def __init__(self):
+  def __init__(self, author: discord.User | discord.Member):
     super().__init__(timeout=180)
+    self.author = author  # コマンドを実行したユーザーを保存
+
+  async def interaction_check(self, interaction: discord.Interaction) -> bool:
+    # ボタンを押したユーザーが実行者本人かチェック
+    if interaction.user.id != self.author.id:
+      await interaction.response.send_message(
+          '⚠️ このスロットパネルは実行した本人だけが操作できます！',
+          ephemeral=True,
+      )
+      return False
+    return True
 
   @discord.ui.button(
       label='🎰 パネルを回す！',
@@ -57,13 +68,6 @@ class SlotPanelView(discord.ui.View):
       self, interaction: discord.Interaction, button: discord.ui.Button
   ):
     emojis = ['🍒', '🍋', '🔔', '⭐', '💎', '7️⃣']
-
-    # 応答を開始（回転中の案内メッセージ）
-    await interaction.response.send_message(
-        '🎰 **【スロットパネル回転中…】**\n🌀 [ 🎰 | 🎰 | 🎰 ]', ephemeral=True
-    )
-
-    # 抽選結果
     res = [random.choice(emojis) for _ in range(3)]
     panel_display = f'| {res[0]} | {res[1]} | {res[2]} |'
 
@@ -81,18 +85,33 @@ class SlotPanelView(discord.ui.View):
     else:
       msg = '😢 残念！ハズレです…もう一度挑戦してね！'
 
-    # 結果を後追い送信
-    await interaction.followup.send(
-        f'🎰 **【スロットパネル確定】**\n```\n{panel_display}\n```\n{msg}',
-        ephemeral=True,
+    embed = discord.Embed(
+        title='🎰 スロットパネルを設置しました！',
+        description=(
+            f'```\n{panel_display}\n```\n{msg}\n\n'
+            'もう一度回す場合は下のボタンを押してね！'
+        ),
+        color=discord.Color.gold(),
     )
 
+    # 直前のメッセージをそのまま上書き更新
+    await interaction.response.edit_message(embed=embed, view=self)
 
-# --- 4. ボタン式ガチャのViewクラス ---
+
+# --- 4. ボタン式ガチャ (自分だけが操作可能) ---
 class GachaView(discord.ui.View):
 
-  def __init__(self):
+  def __init__(self, author: discord.User | discord.Member):
     super().__init__(timeout=180)
+    self.author = author
+
+  async def interaction_check(self, interaction: discord.Interaction) -> bool:
+    if interaction.user.id != self.author.id:
+      await interaction.response.send_message(
+          '⚠️ 実行した本人だけが操作できます！', ephemeral=True
+      )
+      return False
+    return True
 
   @discord.ui.button(
       label='✨ ガチャを回す！',
@@ -121,17 +140,34 @@ class GachaView(discord.ui.View):
     }
 
     item, money = rewards[rarity]
-    await interaction.response.send_message(
-        f'🎁 ガチャ結果: **[{rarity}] {item}**\n💰 獲得賞金: **{money:,} まるもね** ゲット！',
-        ephemeral=True,
+
+    embed = discord.Embed(
+        title='🎰 まるちき鯖 ガチャ会場',
+        description=(
+            f'🎁 ガチャ結果: **[{rarity}] {item}**\n'
+            f'💰 獲得賞金: **{money:,} まるもね** ゲット！\n\n'
+            'もう一度引く場合は下のボタンを押してね！'
+        ),
+        color=discord.Color.blue(),
     )
 
+    await interaction.response.edit_message(embed=embed, view=self)
 
-# --- 5. ボタン式くじ引きのViewクラス ---
+
+# --- 5. ボタン式くじ引き (自分だけが操作可能) ---
 class KujibikiView(discord.ui.View):
 
-  def __init__(self):
+  def __init__(self, author: discord.User | discord.Member):
     super().__init__(timeout=180)
+    self.author = author
+
+  async def interaction_check(self, interaction: discord.Interaction) -> bool:
+    if interaction.user.id != self.author.id:
+      await interaction.response.send_message(
+          '⚠️ 実行した本人だけが操作できます！', ephemeral=True
+      )
+      return False
+    return True
 
   @discord.ui.button(
       label='🎯 くじを引く！',
@@ -151,10 +187,18 @@ class KujibikiView(discord.ui.View):
         ('💀 ざんねん：ハズレ…', 0),
     ]
     result_text, money = random.choice(fortunes)
-    await interaction.response.send_message(
-        f'🎟️ くじの結果: **{result_text}**\n💰 獲得賞金: **{money:,} まるもね** ゲット！',
-        ephemeral=True,
+
+    embed = discord.Embed(
+        title='🎁 まるちき鯖 くじ引き会場',
+        description=(
+            f'🎟️ くじの結果: **{result_text}**\n'
+            f'💰 獲得賞金: **{money:,} まるもね** ゲット！\n\n'
+            'もう一度引く場合は下のボタンを押してね！'
+        ),
+        color=discord.Color.green(),
     )
+
+    await interaction.response.edit_message(embed=embed, view=self)
 
 
 # --- 6. メインゲーム & work コマンド ---
@@ -162,27 +206,42 @@ class KujibikiView(discord.ui.View):
 
 @bot.tree.command(name='slot', description='スロットパネルを回して大金を狙おう！')
 async def slot(interaction: discord.Interaction):
-  view = SlotPanelView()
+  view = SlotPanelView(author=interaction.user)
   embed = discord.Embed(
-      title='🎰 まるちき鯖 スロットパネル',
+      title='🎰 スロットパネルを設置しました！',
       description=(
           '【配当表】\n'
           '7️⃣ 7️⃣ 7️⃣ : **100,000 まるもね**\n'
           '💎 💎 💎 : **50,000 まるもね**\n'
           '2つ一致 : **5,000 まるもね**\n\n'
-          '下のボタンを押してパネルを回してね！'
+          '下の「🎰 パネルを回す！」ボタンを押してスタートしてね！'
       ),
       color=discord.Color.gold(),
   )
-  await interaction.response.send_message(embed=embed, view=view)
+  # 自分だけに表示
+  await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 @bot.tree.command(name='gacha', description='ボタンを押して装備ガチャを引きます！')
 async def gacha(interaction: discord.Interaction):
-  view = GachaView()
-  await interaction.response.send_message(
-      '🎰 **まるちき鯖 ガチャ会場**\n下のボタンを押して引いてね！', view=view
+  view = GachaView(author=interaction.user)
+  embed = discord.Embed(
+      title='🎰 まるちき鯖 ガチャ会場',
+      description='下のボタンを押してガチャを引いてね！',
+      color=discord.Color.blue(),
   )
+  await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
+@bot.tree.command(name='kujibiki', description='ボタンを押してくじ引きをします！')
+async def kujibiki(interaction: discord.Interaction):
+  view = KujibikiView(author=interaction.user)
+  embed = discord.Embed(
+      title='🎁 まるちき鯖 くじ引き会場',
+      description='下のボタンを押して運試しをしよう！',
+      color=discord.Color.green(),
+  )
+  await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 @bot.tree.command(
@@ -200,14 +259,6 @@ async def work(interaction: discord.Interaction):
   earned = random.randint(min_earn, max_earn)
   await interaction.response.send_message(
       f'💼 お仕事「{job_name}」を頑張った！\n💰 報酬として **{earned:,} まるもね** をゲット！🎉'
-  )
-
-
-@bot.tree.command(name='kujibiki', description='ボタンを押してくじ引きをします！')
-async def kujibiki(interaction: discord.Interaction):
-  view = KujibikiView()
-  await interaction.response.send_message(
-      '🎁 **まるちき鯖 くじ引き会場**\n下のボタンを押して運試しをしよう！', view=view
   )
 
 
