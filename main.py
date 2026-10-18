@@ -151,7 +151,7 @@ class StatusView(discord.ui.View):
   def interaction_check(self, interaction: discord.Interaction) -> bool:
     return True
 
-  @tasks.loop(seconds=1)
+  @tasks.loop(seconds=1.0)
   async def update_task(self):
     if not self.is_running or not self.message:
       return
@@ -396,8 +396,9 @@ async def help_command(interaction: discord.Interaction):
           '• `/rps` - じゃんけん勝負\n'
           '• `/choice` - 複数の選択肢からランダムに1つ選ぶ\n'
           '• `/minigame` - 140個のミニゲームから番号を指定して遊ぶ！\n\n'
-          '⚙️ **システム系**\n'
-          '• `/status` - BotのリアルタイムUptime・Ping・リソース状況を表示\n'
+          '⚙️ **システム・管理系**\n'
+          '• `/status` - Botのステータス（みんなに見える公開表示）\n'
+          '• `/admin-status` - 【管理者用】詳細ステータス（自動更新付き）\n'
           '• `/help` - このヘルプを表示'
       ),
       color=discord.Color.blurple(),
@@ -528,14 +529,12 @@ async def balance(
     )
 
 
-# Botステータスコマンド（1秒ごとにリアルタイム更新）
+# Botステータスコマンド（みんなに見える公開表示版）
 @bot.tree.command(
     name='status',
-    description='Botの稼働時間(Uptime)、Ping値、RAM・CPU情報等をリアルタイム表示します',
+    description='Botの稼働時間(Uptime)、Ping値、RAM・CPU情報等をみんなに表示します',
 )
 async def status(interaction: discord.Interaction):
-  await interaction.response.defer(ephemeral=True)
-
   latency = round(bot.latency * 1000)
   process = psutil.Process(os.getpid())
   ram_mb = process.memory_info().rss / 1024 / 1024
@@ -566,10 +565,74 @@ async def status(interaction: discord.Interaction):
       value=f'`{len(bot.guilds)}` サーバー',
       inline=False,
   )
-  embed.set_footer(text='🟢 1秒ごとにリアルタイム更新中...')
+  embed.set_footer(text=f'実行者: {interaction.user.name}')
 
-  message = await interaction.followup.send(embed=embed, ephemeral=True)
+  await interaction.response.send_message(embed=embed, ephemeral=False)
+
+
+# 管理者専用ステータスコマンド（自動1秒更新つき）
+@bot.tree.command(
+    name='admin-status',
+    description='【管理者用】Botの詳細ステータスを1秒ごとに自動更新します',
+)
+@app_commands.checks.has_permissions(administrator=True)
+async def admin_status(interaction: discord.Interaction):
+  await interaction.response.defer(ephemeral=False)
+
+  latency = round(bot.latency * 1000)
+  process = psutil.Process(os.getpid())
+  ram_mb = process.memory_info().rss / 1024 / 1024
+  cpu_percent = psutil.cpu_percent()
+
+  uptime_seconds = int(time.time() - bot_start_time)
+  days = uptime_seconds // 86400
+  hours = (uptime_seconds % 86400) // 3600
+  minutes = (uptime_seconds % 3600) // 60
+  seconds = uptime_seconds % 60
+
+  if days > 0:
+    uptime_str = f'`{days}日 {hours}時間 {minutes}分 {seconds}秒`'
+  else:
+    uptime_str = f'`{hours}時間 {minutes}分 {seconds}秒`'
+
+  embed = discord.Embed(
+      title='🛡️ 【管理者用】Bot リアルタイムステータス',
+      color=discord.Color.dark_red(),
+  )
+  embed.add_field(name='⏱️ 稼働時間 (Uptime)', value=uptime_str, inline=False)
+  embed.add_field(name='🏓 応答速度 (Ping)', value=f'`{latency} ms`', inline=True)
+  embed.add_field(
+      name='💾 RAM 使用量', value=f'`{ram_mb:.2f} MB`', inline=True
+  )
+  embed.add_field(
+      name='🖥️ CPU 使用率', value=f'`{cpu_percent:.1f} %`', inline=True
+  )
+  embed.add_field(
+      name='🌐 参加サーバー数',
+      value=f'`{len(bot.guilds)}` サーバー',
+      inline=False,
+  )
+  embed.set_footer(
+      text=f'👑 管理者専用 | 1秒ごとに自動更新中... (実行者: {interaction.user.name})'
+  )
+
+  message = await interaction.followup.send(embed=embed, ephemeral=False)
   StatusView(bot_instance=bot, message_to_edit=message)
+
+
+@admin_status.error
+async def admin_status_error(
+    interaction: discord.Interaction, error: app_commands.AppCommandError
+):
+  if isinstance(error, app_commands.errors.MissingPermissions):
+    await interaction.response.send_message(
+        '⚠️ このコマンドはサーバーの**管理者権限（Administrator）**を持つ方しか実行できません！',
+        ephemeral=True,
+    )
+  else:
+    await interaction.response.send_message(
+        f'⚠️ エラーが発生しました: {error}', ephemeral=True
+    )
 
 
 # 選択肢ランダム決定コマンド（choice）
