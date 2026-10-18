@@ -16,16 +16,19 @@ def home():
 
 
 def run():
-  app.run(host='0.0.0.0', port=8080)
+  # Renderが指定するポートを取得、なければ8080を使用
+  port = int(os.environ.get('PORT', 8080))
+  app.run(host='0.0.0.0', port=port)
 
 
 def keep_alive():
-  t = threading.Thread(target=run)
+  t = threading.Thread(target=run, daemon=True)
   t.start()
 
 
 # --- 2. Discord BotとCommand Treeの設定 ---
 intents = discord.Intents.default()
+# スラッシュコマンド主体のためmessage_contentは必須ではありませんが、念のため有効化
 intents.message_content = True
 
 bot = commands.Bot(command_prefix='/', intents=intents)
@@ -33,19 +36,18 @@ bot = commands.Bot(command_prefix='/', intents=intents)
 
 @bot.event
 async def on_ready():
-  print(f'ログイン成功: {bot.user.name}')
+  print(f'ログイン成功: {bot.user.name} (ID: {bot.user.id})')
   try:
-    # スラッシュコマンド(bot.tree)をDiscordサーバーに同期
+    # スラッシュコマンドをDiscordサーバーに同期
     synced = await bot.tree.sync()
     print(f'スラッシュコマンドを {len(synced)} 個同期しました！')
   except Exception as e:
-    print(f'同期エラー: {e}')
+    print(f'同期エラーが発生しました: {e}')
 
 
 # --- 3. 個別実装の主要ゲームコマンド (1〜15) ---
 
 
-# 1. 1〜6のサイコロ
 @bot.tree.command(name='dice', description='1〜6のサイコロを振ります')
 async def dice(interaction: discord.Interaction):
   await interaction.response.send_message(
@@ -53,7 +55,6 @@ async def dice(interaction: discord.Interaction):
   )
 
 
-# 2. 100面ダイス
 @bot.tree.command(name='dice100', description='1〜100のダイスを振ります')
 async def dice100(interaction: discord.Interaction):
   await interaction.response.send_message(
@@ -61,7 +62,6 @@ async def dice100(interaction: discord.Interaction):
   )
 
 
-# 3. 2d6 (サイコロ2個)
 @bot.tree.command(name='dice2', description='サイコロを2個振ります')
 async def dice2(interaction: discord.Interaction):
   d1, d2 = random.randint(1, 6), random.randint(1, 6)
@@ -70,7 +70,6 @@ async def dice2(interaction: discord.Interaction):
   )
 
 
-# 4. スロットマシーン
 @bot.tree.command(name='slot', description='スロットマシーンを回します')
 async def slot(interaction: discord.Interaction):
   emojis = ['🍒', '🍋', '🔔', '⭐', '💎', '7️⃣']
@@ -85,14 +84,12 @@ async def slot(interaction: discord.Interaction):
   await interaction.response.send_message(msg)
 
 
-# 5. コイントス
 @bot.tree.command(name='coin', description='コイントスをします')
 async def coin(interaction: discord.Interaction):
   res = random.choice(['表 (Heads)', '裏 (Tails)'])
   await interaction.response.send_message(f'🪙 コイントス: **{res}**')
 
 
-# 6. じゃんけん
 @bot.tree.command(name='rps', description='じゃんけん勝負！')
 @app_commands.choices(
     hand=[
@@ -121,7 +118,6 @@ async def rps(interaction: discord.Interaction, hand: app_commands.Choice[str]):
   )
 
 
-# 7. おみくじ
 @bot.tree.command(name='omikuji', description='今日の運勢を占います')
 async def omikuji(interaction: discord.Interaction):
   fortunes = ['大吉', '吉', '中吉', '小吉', '末吉', '凶', '大凶']
@@ -130,7 +126,6 @@ async def omikuji(interaction: discord.Interaction):
   )
 
 
-# 8. 単発ガチャ
 @bot.tree.command(name='gacha', description='装備ガチャを引きます')
 async def gacha(interaction: discord.Interaction):
   rarity = random.choices(
@@ -147,7 +142,6 @@ async def gacha(interaction: discord.Interaction):
   )
 
 
-# 9. 10連ガチャ
 @bot.tree.command(name='gacha10', description='10連ガチャを引きます')
 async def gacha10(interaction: discord.Interaction):
   rarities = ['SSR', 'SR', 'R', 'N']
@@ -158,7 +152,6 @@ async def gacha10(interaction: discord.Interaction):
   await interaction.response.send_message(msg)
 
 
-# 10. ラッキーカラー
 @bot.tree.command(name='color', description='今日のラッキーカラー')
 async def color(interaction: discord.Interaction):
   colors = ['🔴 赤', '🔵 青', '🟢 緑', '🟡 黄', '🟣 紫', '🟠 オレンジ', '⚪ 白', '⚫ 黒']
@@ -167,7 +160,6 @@ async def color(interaction: discord.Interaction):
   )
 
 
-# 11. ラッキーフード
 @bot.tree.command(name='food', description='今日のラッキーフード')
 async def food(interaction: discord.Interaction):
   foods = [
@@ -185,14 +177,12 @@ async def food(interaction: discord.Interaction):
   )
 
 
-# 12. 勝敗判定
 @bot.tree.command(name='vs', description='バトル勝敗判定')
 async def vs(interaction: discord.Interaction):
   res = random.choice(['勝利！🔥', '敗北…💀'])
   await interaction.response.send_message(f'⚔️ 戦闘結果: **{res}**')
 
 
-# 13. 属性診断
 @bot.tree.command(name='element', description='あなたの属性を診断')
 async def element(interaction: discord.Interaction):
   elements = ['🔥 火', '💧 水', '🍃 風', '⚡ 雷', '🪨 地', '✨ 光', '🌙 闇']
@@ -201,7 +191,6 @@ async def element(interaction: discord.Interaction):
   )
 
 
-# 14. 今日のステータス
 @bot.tree.command(name='status', description='今日のステータスを計測')
 async def status(interaction: discord.Interaction):
   hp = random.randint(50, 999)
@@ -212,9 +201,14 @@ async def status(interaction: discord.Interaction):
   )
 
 
-# 15. 数当てゲーム
-@bot.tree.command(name='number', description='1〜10の数当て')
+@bot.tree.command(name='number', description='1〜10の数当てゲーム')
+@app_commands.describe(予想='1から10までの数字を入力してください')
 async def number(interaction: discord.Interaction, 予想: int):
+  if not (1 <= 予想 <= 10):
+    await interaction.response.send_message(
+        '⚠️ 1から10までの数字を入力してください！', ephemeral=True
+    )
+    return
   answer = random.randint(1, 10)
   if 予想 == answer:
     await interaction.response.send_message(
@@ -226,7 +220,7 @@ async def number(interaction: discord.Interaction, 予想: int):
     )
 
 
-# --- 4. 一括登録のゲーム・ミニゲームコマンド (16〜45) ---
+# --- 4. 自動生成のゲームコマンド (16〜45) ---
 custom_games = {
     'weapon': (
         '武器診断',
@@ -404,22 +398,21 @@ custom_games = {
 }
 
 
-# ループ処理でスラッシュコマンドを動的に作成・登録
-def add_custom_command(name, desc, title, choices):
+def register_command(name, desc, title, choices):
   @bot.tree.command(name=name, description=desc)
-  async def _cmd(interaction: discord.Interaction):
+  async def dynamic_command(interaction: discord.Interaction):
     await interaction.response.send_message(
         f'{title}: **{random.choice(choices)}**'
     )
 
 
 for cmd_name, (desc, title, choices) in custom_games.items():
-  add_custom_command(cmd_name, desc, title, choices)
+  register_command(cmd_name, desc, title, choices)
 
 
 # --- 5. ボット起動 ---
 if __name__ == '__main__':
-  keep_alive()  # UptimeRobot用のWebサーバーを起動
+  keep_alive()  # Webサーバーをバックグラウンドで起動
   TOKEN = os.environ.get('DISCORD_BOT_TOKEN')
   if TOKEN:
     bot.run(TOKEN)
