@@ -1,7 +1,6 @@
 import os
 import random
 import threading
-import time
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -72,10 +71,7 @@ class StatusView(discord.ui.View):
   async def refresh_button(
       self, interaction: discord.Interaction, button: discord.ui.Button
   ):
-    # Ping
     latency = round(self.bot.latency * 1000)
-
-    # メモリ (RAM) & CPU 使用量
     process = psutil.Process(os.getpid())
     ram_mb = process.memory_info().rss / 1024 / 1024
     cpu_percent = psutil.cpu_percent()
@@ -101,7 +97,7 @@ class StatusView(discord.ui.View):
     await interaction.response.edit_message(embed=embed, view=self)
 
 
-# --- 4. 所持金確認 & ランキング & ステータスコマンド ---
+# --- 4. 所持金確認 & お金持ちランキング & ステータスコマンド ---
 
 
 @bot.tree.command(
@@ -139,7 +135,7 @@ async def okanemoti_ranking(interaction: discord.Interaction):
     )
     return
 
-  # 所持金が多い順にソート
+  # 所持金が多い順にリアルタイムソート
   sorted_users = sorted(
       user_balance.items(), key=lambda item: item[1], reverse=True
   )
@@ -156,7 +152,7 @@ async def okanemoti_ranking(interaction: discord.Interaction):
       description=ranking_text,
       color=discord.Color.gold(),
   )
-  embed.set_footer(text='※お金が増減すると自動で順位が自動更新されます')
+  embed.set_footer(text='※お金が増減するとランキングが自動でリアルタイム更新されます')
 
   await interaction.response.send_message(embed=embed)
 
