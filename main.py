@@ -42,7 +42,53 @@ async def on_ready():
     print(f'同期エラーが発生しました: {e}')
 
 
-# --- 3. ボタン式ガチャのViewクラス (報酬金額反映) ---
+# --- 3. ボタン式スロットパネルのViewクラス ---
+class SlotPanelView(discord.ui.View):
+
+  def __init__(self):
+    super().__init__(timeout=180)
+
+  @discord.ui.button(
+      label='🎰 パネルを回す！',
+      style=discord.ButtonStyle.danger,
+      custom_id='spin_slot_button',
+  )
+  async def spin_button(
+      self, interaction: discord.Interaction, button: discord.ui.Button
+  ):
+    emojis = ['🍒', '🍋', '🔔', '⭐', '💎', '7️⃣']
+
+    # 応答を開始（回転中の案内メッセージ）
+    await interaction.response.send_message(
+        '🎰 **【スロットパネル回転中…】**\n🌀 [ 🎰 | 🎰 | 🎰 ]', ephemeral=True
+    )
+
+    # 抽選結果
+    res = [random.choice(emojis) for _ in range(3)]
+    panel_display = f'| {res[0]} | {res[1]} | {res[2]} |'
+
+    # 配当判定
+    if res[0] == res[1] == res[2]:
+      if res[0] == '7️⃣':
+        prize = 100000
+        msg = f'🎉 **超ジャックポット！！777達成！**\n💰 **{prize:,} まるもね** 獲得！'
+      else:
+        prize = 50000
+        msg = f'🎉 **ジャックポット達成！**\n💰 **{prize:,} まるもね** 獲得！'
+    elif res[0] == res[1] or res[1] == res[2] or res[0] == res[2]:
+      prize = 5000
+      msg = f'✨ **2つ揃いました！**\n💰 **{prize:,} まるもね** 獲得！'
+    else:
+      msg = '😢 残念！ハズレです…もう一度挑戦してね！'
+
+    # 結果を後追い送信
+    await interaction.followup.send(
+        f'🎰 **【スロットパネル確定】**\n```\n{panel_display}\n```\n{msg}',
+        ephemeral=True,
+    )
+
+
+# --- 4. ボタン式ガチャのViewクラス ---
 class GachaView(discord.ui.View):
 
   def __init__(self):
@@ -56,7 +102,6 @@ class GachaView(discord.ui.View):
   async def button_callback(
       self, interaction: discord.Interaction, button: discord.ui.Button
   ):
-    # レア度と報酬まるもねの設定
     rarity, weight = random.choices(
         [
             ('SSR', 3),
@@ -82,7 +127,7 @@ class GachaView(discord.ui.View):
     )
 
 
-# --- 4. ボタン式くじ引きのViewクラス (報酬金額反映) ---
+# --- 5. ボタン式くじ引きのViewクラス ---
 class KujibikiView(discord.ui.View):
 
   def __init__(self):
@@ -112,7 +157,24 @@ class KujibikiView(discord.ui.View):
     )
 
 
-# --- 5. メインゲーム & work コマンド ---
+# --- 6. メインゲーム & work コマンド ---
+
+
+@bot.tree.command(name='slot', description='スロットパネルを回して大金を狙おう！')
+async def slot(interaction: discord.Interaction):
+  view = SlotPanelView()
+  embed = discord.Embed(
+      title='🎰 まるちき鯖 スロットパネル',
+      description=(
+          '【配当表】\n'
+          '7️⃣ 7️⃣ 7️⃣ : **100,000 まるもね**\n'
+          '💎 💎 💎 : **50,000 まるもね**\n'
+          '2つ一致 : **5,000 まるもね**\n\n'
+          '下のボタンを押してパネルを回してね！'
+      ),
+      color=discord.Color.gold(),
+  )
+  await interaction.response.send_message(embed=embed, view=view)
 
 
 @bot.tree.command(name='gacha', description='ボタンを押して装備ガチャを引きます！')
@@ -156,20 +218,6 @@ async def dice(interaction: discord.Interaction):
   )
 
 
-@bot.tree.command(name='slot', description='スロットマシーンを回します')
-async def slot(interaction: discord.Interaction):
-  emojis = ['🍒', '🍋', '🔔', '⭐', '💎', '7️⃣']
-  res = [random.choice(emojis) for _ in range(3)]
-  msg = f'🎰 [{" | ".join(res)}]\n'
-  if res[0] == res[1] == res[2]:
-    msg += '🎉 **ジャックポット！！100,000まるもね獲得！**'
-  elif res[0] == res[1] or res[1] == res[2] or res[0] == res[2]:
-    msg += '✨ **おしい！2つ揃った！ (5,000まるもね)**'
-  else:
-    msg += '😢 ハズレ！もう一回！'
-  await interaction.response.send_message(msg)
-
-
 @bot.tree.command(name='coin', description='コイントスをします')
 async def coin(interaction: discord.Interaction):
   res = random.choice(['表 (Heads)', '裏 (Tails)'])
@@ -202,7 +250,7 @@ async def rps(interaction: discord.Interaction, hand: app_commands.Choice[str]):
   )
 
 
-# --- 6. 89個のミニゲーム・診断コマンド群 ---
+# --- 7. 89個のミニゲーム・診断コマンド群 ---
 mini_games_89 = {
     'game1': ('的当てゲーム', '🎯 的当て', ['中央命中！', '惜しくも外れ', 'かすり傷']),
     'game2': ('ボウリング', '🎳 ボウリング', ['ストライク！', 'スペア！', 'ガター…']),
@@ -214,7 +262,7 @@ mini_games_89 = {
         ['超ロングシュート成功！', 'ボードに弾かれた', 'エアボール'],
     ),
     'game6': (
-        'ペナルティキック',
+        'ペネルティキック',
         '⚽ サッカー',
         ['ゴール左上へ突き刺さった！', 'キーパー正面', '枠外'],
     ),
@@ -339,7 +387,6 @@ mini_games_89 = {
 def register_mini_game(name, desc, title, choices):
   @bot.tree.command(name=name, description=desc)
   async def dynamic_mini_cmd(interaction: discord.Interaction):
-    # ミニゲームも当たったらボーナスまるもねが出るように！
     bonus_money = random.choice([100, 500, 1000, 5000, 10000])
     choice_result = random.choice(choices)
     await interaction.response.send_message(
@@ -351,7 +398,7 @@ for cmd_name, (desc, title, choices) in mini_games_89.items():
   register_mini_game(cmd_name, desc, title, choices)
 
 
-# --- 7. ボット起動 ---
+# --- 8. ボット起動 ---
 if __name__ == '__main__':
   keep_alive()
   TOKEN = os.environ.get('DISCORD_BOT_TOKEN')
