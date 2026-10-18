@@ -16,7 +16,6 @@ def home():
 
 
 def run():
-  # Renderが指定するポートを取得、なければ8080を使用
   port = int(os.environ.get('PORT', 8080))
   app.run(host='0.0.0.0', port=port)
 
@@ -28,7 +27,6 @@ def keep_alive():
 
 # --- 2. Discord BotとCommand Treeの設定 ---
 intents = discord.Intents.default()
-# スラッシュコマンド主体のためmessage_contentは必須ではありませんが、念のため有効化
 intents.message_content = True
 
 bot = commands.Bot(command_prefix='/', intents=intents)
@@ -38,14 +36,50 @@ bot = commands.Bot(command_prefix='/', intents=intents)
 async def on_ready():
   print(f'ログイン成功: {bot.user.name} (ID: {bot.user.id})')
   try:
-    # スラッシュコマンドをDiscordサーバーに同期
     synced = await bot.tree.sync()
     print(f'スラッシュコマンドを {len(synced)} 個同期しました！')
   except Exception as e:
     print(f'同期エラーが発生しました: {e}')
 
 
-# --- 3. 個別実装の主要ゲームコマンド (1〜15) ---
+# --- 3. ボタンUIを使ったくじ引きクラス ---
+class KujibikiView(discord.ui.View):
+
+  def __init__(self):
+    super().__init__(timeout=180)
+
+  @discord.ui.button(
+      label='🎯 くじを引く！',
+      style=discord.ButtonStyle.green,
+      custom_id='kujibiki_button',
+  )
+  async def button_callback(
+      self, interaction: discord.Interaction, button: discord.ui.Button
+  ):
+    fortunes = [
+        '🌟 特賞：まるちき鯖の主！',
+        '💎 大当たり：激レアアイテム獲得！',
+        '🎉 吉：いいことあるかも！',
+        '✨ 中吉：普段通りの平穏な一日',
+        '💧 小吉：ちょっとしたラッキー',
+        '🍃 末吉：慎重に行こう',
+        '💀 ざんねん：ハズレ…',
+    ]
+    result = random.choice(fortunes)
+    await interaction.response.send_message(
+        f'🎟️ 引く結果：**{result}**', ephemeral=True
+    )
+
+
+# --- 4. 個別実装の主要ゲームコマンド ---
+
+
+@bot.tree.command(name='kujibiki', description='ボタンを押してくじ引きをします！')
+async def kujibiki(interaction: discord.Interaction):
+  view = KujibikiView()
+  await interaction.response.send_message(
+      '🎁 **まるちき鯖 くじ引き会場**\n下のボタンを押して運試しをしよう！', view=view
+  )
 
 
 @bot.tree.command(name='dice', description='1〜6のサイコロを振ります')
@@ -101,7 +135,6 @@ async def coin(interaction: discord.Interaction):
 async def rps(interaction: discord.Interaction, hand: app_commands.Choice[str]):
   user_hand = hand.value
   bot_hand = random.choice(['グー', 'チョキ', 'パー'])
-
   if user_hand == bot_hand:
     result = 'あいこ！'
   elif (
@@ -112,7 +145,6 @@ async def rps(interaction: discord.Interaction, hand: app_commands.Choice[str]):
     result = 'あなたの勝ち！🎉'
   else:
     result = 'Botの勝ち！🤖'
-
   await interaction.response.send_message(
       f'あなた: {user_hand} vs Bot: {bot_hand}\n結果: **{result}**'
   )
@@ -152,267 +184,268 @@ async def gacha10(interaction: discord.Interaction):
   await interaction.response.send_message(msg)
 
 
-@bot.tree.command(name='color', description='今日のラッキーカラー')
-async def color(interaction: discord.Interaction):
-  colors = ['🔴 赤', '🔵 青', '🟢 緑', '🟡 黄', '🟣 紫', '🟠 オレンジ', '⚪ 白', '⚫ 黒']
-  await interaction.response.send_message(
-      f'🎨 ラッキーカラー: **{random.choice(colors)}**'
-  )
-
-
-@bot.tree.command(name='food', description='今日のラッキーフード')
-async def food(interaction: discord.Interaction):
-  foods = [
-      'ラーメン',
-      'カレーライス',
-      '寿司',
-      'ハンバーグ',
-      '焼肉',
-      'パスタ',
-      'うどん',
-      'ピザ',
-  ]
-  await interaction.response.send_message(
-      f'🍔 ラッキーフード: **{random.choice(foods)}**'
-  )
-
-
-@bot.tree.command(name='vs', description='バトル勝敗判定')
-async def vs(interaction: discord.Interaction):
-  res = random.choice(['勝利！🔥', '敗北…💀'])
-  await interaction.response.send_message(f'⚔️ 戦闘結果: **{res}**')
-
-
-@bot.tree.command(name='element', description='あなたの属性を診断')
-async def element(interaction: discord.Interaction):
-  elements = ['🔥 火', '💧 水', '🍃 風', '⚡ 雷', '🪨 地', '✨ 光', '🌙 闇']
-  await interaction.response.send_message(
-      f'🔮 あなたの属性: **{random.choice(elements)}**'
-  )
-
-
-@bot.tree.command(name='status', description='今日のステータスを計測')
-async def status(interaction: discord.Interaction):
-  hp = random.randint(50, 999)
-  mp = random.randint(10, 500)
-  atk = random.randint(10, 100)
-  await interaction.response.send_message(
-      f'📊 **今日のステータス**\nHP: {hp} | MP: {mp} | 攻撃力: {atk}'
-  )
-
-
-@bot.tree.command(name='number', description='1〜10の数当てゲーム')
-@app_commands.describe(予想='1から10までの数字を入力してください')
-async def number(interaction: discord.Interaction, 予想: int):
-  if not (1 <= 予想 <= 10):
-    await interaction.response.send_message(
-        '⚠️ 1から10までの数字を入力してください！', ephemeral=True
-    )
-    return
-  answer = random.randint(1, 10)
-  if 予想 == answer:
-    await interaction.response.send_message(
-        f'🎯 **正解！** (答え: {answer})'
-    )
-  else:
-    await interaction.response.send_message(
-        f'❌ **不正解…** (あなたの予想: {予想} / 答え: {answer})'
-    )
-
-
-# --- 4. 自動生成のゲームコマンド (16〜45) ---
-custom_games = {
-    'weapon': (
-        '武器診断',
-        '🗡️ 今日の武器',
-        ['聖剣', '魔剣', '竹刀', 'フライパン', '魔法のステッキ'],
+# --- 5. 追加した50個のゲーム・診断・ミニゲームコマンド群 ---
+extra_games = {
+    'shindan_love': ('恋愛診断', '💖 恋愛運', ['モテ期到来！', '片思いが進展', 'いつも通り', '要注意']),
+    'shindan_money': ('金運診断', '💰 金運', ['宝くじの予感', '臨時収入あり', '節約推奨', '財布がピンチ']),
+    'shindan_study': (
+        '勉強運診断',
+        '📖 勉強運',
+        ['天才的インスピレーション', '集中力MAX', '眠気が勝つ', '休憩しよう'],
     ),
-    'job': (
-        '職業診断',
-        '💼 今日の職業',
-        ['勇者', '魔法使い', '武闘家', '商人', '遊び人'],
+    'shindan_game': (
+        'ゲーム運診断',
+        '🎮 ゲーム運',
+        ['ランクマ連勝！', 'ガチャ爆死注意', '神引き炸裂', 'ラグに負ける'],
     ),
-    'pet': (
-        'ペットガチャ',
-        '🐾 相棒のペット',
-        ['ドラゴン', '柴犬', '黒猫', 'スライム', 'フクロウ'],
+    'shindan_sports': (
+        '運動運診断',
+        '⚽ 運動運',
+        ['身体能力爆発', '筋肉痛フラグ', '怪我に注意', '好調'],
     ),
-    'dungeon': (
-        'ダンジョン探索',
-        '🏰 ダンジョン結果',
-        [
-            '宝箱を発見した！',
-            '罠にかかった！',
-            'ボスが現れた！',
-            '無事に脱出した！',
-        ],
+    'shindan_lucky_item': (
+        'ラッキーアイテム',
+        '🎒 ラッキーアイテム',
+        ['スマートフォン', 'お気に入りのペン', 'ハンカチ', 'サングラス'],
     ),
-    'magic': (
-        '魔法習得',
-        '🪄 習得した魔法',
-        ['メラゾーマ', 'イオナズン', 'ベホマ', 'ザラキ', 'パルプンテ'],
+    'shindan_lucky_number': (
+        'ラッキーナンバー',
+        '🔢 ラッキーナンバー',
+        ['7', '3', '42', '99', '1'],
     ),
-    'power': (
-        '戦闘力計測',
-        '💪 戦闘力',
-        ['5', '530,000', '9,999,999', '120', '計測不能'],
+    'shindan_lucky_time': (
+        'ラッキータイム',
+        '⏰ ラッキータイム',
+        ['朝の3時', '12時ちょうど', '15時のおやつ時', '深夜2時'],
     ),
-    'rank': (
-        'ランク診断',
-        '🏆 今日のランク',
-        ['S級', 'A級', 'B級', 'C級', 'D級'],
+    'shindan_lucky_letter': (
+        'ラッキーイニシャル',
+        '🔤 ラッキーイニシャル',
+        ['A', 'K', 'M', 'S', 'T'],
     ),
-    'party': (
-        'PT雰囲気',
-        '🎉 パーティの状態',
-        [
-            '最高に盛り上がっている！',
-            'まったり会話中',
-            '静まり返っている…',
-        ],
+    'shindan_animal': (
+        '前世の動物診断',
+        '🐾 前世の姿',
+        ['野生のライオン', '自由な猫', 'のんびりパンダ', '空飛ぶタカ'],
     ),
-    'luck': (
-        '運気アップ',
-        '🍀 運気上昇の鍵',
-        ['早起きする', '挨拶をする', '水を飲む', '部屋の掃除'],
+    'shindan_element2': (
+        '特殊属性診断',
+        '✨ 特殊属性',
+        ['超能力', 'サイコキネシス', 'タイムコントロール', '隐身'],
     ),
-    'item': (
-        'ドロップアイテム',
-        '🎒 拾ったアイテム',
-        ['やくそう', 'どくけしそう', 'エリクサー', '金の塊'],
+    'shindan_future_job': (
+        '将来の職業診断',
+        '👔 将来の姿',
+        ['大富豪', 'プロゲーマー', '発明家', '有名アーティスト'],
     ),
-    'curse': (
-        '呪い診断',
-        '☠️ 今日の呪い',
-        [
-            '語尾に「にゃ」がつく',
-            '噛みやすくなる',
-            '特に影響なし',
-        ],
+    'shindan_super_power': (
+        '超能力診断',
+        '⚡ 使える超能力',
+        ['空を飛ぶ', '心を読む', '未来予知', '瞬間移動'],
     ),
-    'buff': (
-        'バフ効果',
-        '✨ かかっているバフ',
-        ['移動速度UP', '経験値2倍', 'ドロップ率UP', '運気UP'],
+    'shindan_weapon_type': (
+        '戦闘スタイル診断',
+        '⚔️ 戦闘スタイル',
+        ['前衛アタッカー', '後方ヒーラー', '魔法キャスター', '隠密スナイパー'],
     ),
-    'debuff': (
-        'デバフ効果',
-        '🌀 デバフ状態',
-        ['眠気100%', 'お腹が空いた', '集中力低下', 'なし'],
+    'shindan_dragon': (
+        'ドラゴン相性診断',
+        '🐉 守護ドラゴン',
+        ['紅蓮の火竜', '蒼海の水竜', '黄昏の黒竜', '天空の白竜'],
     ),
-    'compat': (
-        '相性占い',
-        '💞 今日の相性',
-        ['100% (運命！)', '80% (良好)', '50% (普通)', '10% (注意)'],
+    'shindan_robot': (
+        'ロボット性能診断',
+        '🤖 ロボット性能',
+        ['全性能MAX型', '超高速移動型', '高火力重装甲型', 'サポート特化型'],
     ),
-    'boss': (
-        'ボス出現',
-        '👾 現れたボス',
-        [
-            '魔王',
-            '巨大スライム',
-            'メタルキング',
-            'まるちき鯖の主',
-        ],
+    'shindan_kingdom': (
+        '王国での立場診断',
+        '👑 王国での立場',
+        ['国王', '勇敢な騎士', '宮廷魔術師', '気ままな旅人'],
     ),
-    'fishing': (
-        '釣りミニゲーム',
-        '🎣 釣り結果',
-        ['マグロ', 'サーモン', '長靴', '宝箱', 'ボウズ'],
+    'shindan_pirate': (
+        '海賊ランク診断',
+        '🏴‍☠️ 海賊ランク',
+        ['船長', '副船長', '戦闘員', '見習いコック'],
     ),
-    'mining': (
-        '採掘ミニゲーム',
-        '⛏️ 採掘結果',
-        ['ダイヤモンド', '金鉱石', '鉄鉱石', '石ころ'],
+    'shindan_ninja': (
+        '忍者タイプ診断',
+        '🥷 忍者タイプ',
+        ['影分身の達人', '忍術マスター', '隠密のプロ', '手裏剣の名手'],
     ),
-    'exp': (
-        '経験値獲得',
-        '⭐ 獲得EXP',
-        ['100 EXP', '500 EXP', '10000 EXP!', '0 EXP'],
+    'shindan_alien': (
+        '宇宙人遭遇率',
+        '👽 宇宙人遭遇率',
+        ['100% (友達になる)', '50% (目撃する)', '10% (電波を受信する)', '0% (平和)'],
     ),
-    'sleepiness': (
-        '眠気チェック',
-        '😴 眠気レベル',
-        ['0% (元気)', '50% (少し眠い)', '100% (限界)'],
+    'shindan_ghost': (
+        '幽霊耐性診断',
+        '👻 幽霊耐性',
+        ['全く怖くない', '少しビビる', '気絶レベル', '仲良くなれる'],
     ),
-    'hungry': (
-        '空腹度チェック',
-        '🍕 空腹度',
-        ['満腹', '腹八分目', 'ぺこぺこ', '限界'],
+    'shindan_vampire': (
+        '吸血鬼レベル',
+        '🦇 吸血鬼度',
+        ['真祖クラス', '一般の血族', 'トマトジュース好き', '人間'],
     ),
-    'treasure': (
-        '宝箱開け',
-        '💎 宝箱の中身',
-        ['ミミックだった！', '伝説の剣', '1000G', '空っぽ'],
+    'shindan_zombie': (
+        'ゾンビ対策能力',
+        '🧟 生存能力',
+        ['最後まで生き残る', '要塞を作る', '初日で捕まる', 'リーダーになる'],
     ),
-    'skill': (
-        'スキル発動',
-        '⚡ 発動スキル',
-        ['会心の一撃', '絶対防御', '逃げる', '不発'],
+    'shindan_wizard': (
+        '魔法使いの階級',
+        '🧙‍♂️ 魔法階級',
+        ['大賢者', '上級魔法使い', '見習い', '魔法が使えない'],
     ),
-    'drink': (
-        '飲み物診断',
-        '☕ おすすめの飲み物',
-        ['コーヒー', '紅茶', 'エナドリ', '白湯'],
+    'shindan_knight': (
+        '騎士団ランク',
+        '🛡️ 騎士団ランク',
+        ['団長', '精鋭部隊', '一般兵', '訓練生'],
     ),
-    'game_genre': (
-        'ゲームジャンル',
-        '🎮 おすすめジャンル',
-        ['RPG', 'FPS', 'パズル', '音ゲー', '格ゲー'],
+    'shindan_chef': (
+        '料理の才能',
+        '🍳 料理の才能',
+        ['三つ星シェフ級', '普通の美味しさ', '個性的な味', 'キッチンの破壊神'],
     ),
-    'weather': (
-        '天気占い',
-        '🌤️ あなたの周りの天気',
-        ['快晴', '土砂降り', '雷雨', '虹が出ている'],
+    'shindan_musician': (
+        '音楽の才能',
+        '🎵 音楽の才能',
+        ['天才アーティスト', '人気バンドマン', 'カラオケの主', '音痴'],
     ),
-    'music': (
-        'ラッキーBGM',
-        '🎧 ラッキーBGM',
-        ['アニソン', 'J-POP', 'ボカロ', '作業用BGM', 'レトロゲーム'],
+    'shindan_artist': (
+        '芸術の才能',
+        '🎨 芸術の才能',
+        ['ピカソ級の感性', '上質な才能', '抽象的すぎる', '画伯（笑）'],
     ),
-    'spot': (
-        'スポット診断',
-        '⛩️ おすすめスポット',
-        ['公園', 'ゲームセンター', '自分の部屋', 'カフェ'],
+    'shindan_athlete': (
+        '運動神経診断',
+        '🏅 運動神経',
+        ['オリンピック級', 'クラスのエース', '平均的', '文化系'],
     ),
-    'action': (
-        'おすすめ行動',
-        '🏃 今日やるべきこと',
-        ['筋トレ', '読書', 'ゲーム三昧', '早寝'],
+    'shindan_detective': (
+        '名探偵適性',
+        '🔍 推理力',
+        ['名探偵レベル', '普通の刑事', '迷探偵', '犯人役'],
     ),
-    'destiny': (
-        '運命の一言',
-        '🔮 運命のお告げ',
-        [
-            'あきらめないで！',
-            '今日は休もう',
-            'チャンス到来！',
-            '焦りは禁物',
-        ],
+    'shindan_thief': (
+        '怪盗スキル',
+        '💎 怪盗スキル',
+        ['神出鬼没の怪盗', 'スリの技術', '鍵を開けられない', '警察に捕まる'],
     ),
-    'title': (
-        '称号獲得',
-        '🏷️ 獲得した称号',
-        ['伝説の勇者', 'まるちき鯖の主', '初心者ゲーマー', '運無しの極み'],
+    'shindan_king': (
+        '王様度',
+        '👑 王様度',
+        ['カリスマ性抜群', '優しい指導者', 'わがまま', '平民'],
+    ),
+    'shindan_angel': (
+        '天使度',
+        '👼 天使度',
+        ['慈愛に満ちている', 'ピュアな心', '小悪魔気質', '堕天使'],
+    ),
+    'shindan_devil': (
+        '悪魔度',
+        '😈 悪魔度',
+        ['大魔王級', 'イタズラ好き', '普通の人間', '実は天使'],
+    ),
+    'shindan_cat': (
+        '猫度',
+        '🐱 猫度',
+        ['気まぐれマイペース', '甘えん坊', 'ツンデレ', '犬派'],
+    ),
+    'shindan_dog': (
+        '犬度',
+        '🐶 犬度',
+        ['忠実なしっぽ振り', '元気いっぱい', 'おとなしい', '猫派'],
+    ),
+    'shindan_bird': (
+        '鳥類度',
+        '🐦 鳥類度',
+        ['自由に大空を飛ぶ', 'おしゃべり上手', 'マイペース', '歩くのが好き'],
+    ),
+    'shindan_fish': (
+        '魚類度',
+        '🐟 魚類度',
+        ['回遊魚の如くアクティブ', '深海の神秘', 'マイペースに泳ぐ', '陸が好き'],
+    ),
+    'shindan_plant': (
+        '植物タイプ',
+        '🌱 植物タイプ',
+        ['大樹の安定感', 'ひまわりの笑顔', '食虫植物のミステリー', '雑草魂'],
+    ),
+    'shindan_flower': (
+        '花タイプ',
+        '🌸 花タイプ',
+        ['気高き薔薇', '純粋な百合', '太陽のひまわり', '可憐な桜'],
+    ),
+    'shindan_tree': (
+        '樹木タイプ',
+        '🌳 樹木タイプ',
+        ['神聖な御神木', 'たくましいオーク', 'しなやかな柳', '南国のヤシの木'],
+    ),
+    'shindan_stone': (
+        '鉱石タイプ',
+        '💎 鉱石タイプ',
+        ['ダイヤモンド', 'エメラルド', 'ルビー', 'ただの石ころ'],
+    ),
+    'shindan_star': (
+        '星占いタイプ',
+        '🌟 星占い',
+        ['シリウス級の輝き', '北極星の導き', '流れ星の奇跡', '見えない星'],
+    ),
+    'shindan_planet': (
+        '惑星タイプ',
+        '🪐 惑星タイプ',
+        ['情熱の火星', '自由な木星', '神秘の土星', '青き地球'],
+    ),
+    'shindan_galaxy': (
+        '銀河タイプ',
+        '🌌 銀河タイプ',
+        ['アンドロメダ級', '天の川銀河', '未知のブラックホール', '小宇宙'],
+    ),
+    'shindan_dimension': (
+        '次元移動適性',
+        '🌀 次元移動',
+        ['別次元の住人', '自由に行き来できる', '迷子になる', '現世の住人'],
+    ),
+    'shindan_time': (
+        'タイムリープ適性',
+        '⏳ タイムリープ',
+        ['過去を書き換えられる', '未来を見てきた', '今を生きる', '眠くなる'],
+    ),
+    'shindan_dream': (
+        '夢占い',
+        '💤 今日の夢',
+        ['空を飛ぶ夢', '宝くじが当たる夢', '追いかけられる夢', '美味しいものを食べる夢'],
+    ),
+    'shindan_miracle': (
+        '奇跡の確率',
+        '✨ 今日の奇跡',
+        ['確率0.0001%の奇跡', 'ちょっとしたラッキー', 'いつも通り', '逆奇跡発生'],
+    ),
+    'shindan_fortune_cookie': (
+        'フォーチュンクッキー',
+        '🥠 お告げ',
+        ['「一歩踏み出そう」', '「今日は休養が吉」', '「新しい出会いあり」', '「笑顔を忘れないで」'],
     ),
 }
 
 
-def register_command(name, desc, title, choices):
+def register_extra_command(name, desc, title, choices):
   @bot.tree.command(name=name, description=desc)
-  async def dynamic_command(interaction: discord.Interaction):
+  async def dynamic_extra_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(
         f'{title}: **{random.choice(choices)}**'
     )
 
 
-for cmd_name, (desc, title, choices) in custom_games.items():
-  register_command(cmd_name, desc, title, choices)
+for cmd_name, (desc, title, choices) in extra_games.items():
+  register_extra_command(cmd_name, desc, title, choices)
 
 
-# --- 5. ボット起動 ---
+# --- 6. ボット起動 ---
 if __name__ == '__main__':
-  keep_alive()  # Webサーバーをバックグラウンドで起動
+  keep_alive()  # Webサーバー起動
   TOKEN = os.environ.get('DISCORD_BOT_TOKEN')
   if TOKEN:
     bot.run(TOKEN)
