@@ -42,7 +42,7 @@ async def on_ready():
     print(f'同期エラーが発生しました: {e}')
 
 
-# --- 3. ボタン式ガチャのViewクラス ---
+# --- 3. ボタン式ガチャのViewクラス (報酬金額反映) ---
 class GachaView(discord.ui.View):
 
   def __init__(self):
@@ -56,22 +56,33 @@ class GachaView(discord.ui.View):
   async def button_callback(
       self, interaction: discord.Interaction, button: discord.ui.Button
   ):
-    rarity = random.choices(
-        ['SSR', 'SR', 'R', 'N'], weights=[3, 12, 35, 50], k=1
+    # レア度と報酬まるもねの設定
+    rarity, weight = random.choices(
+        [
+            ('SSR', 3),
+            ('SR', 12),
+            ('R', 35),
+            ('N', 50),
+        ],
+        weights=[3, 12, 35, 50],
+        k=1,
     )[0]
-    items = {
-        'SSR': '💎 伝説のまるもねソード',
-        'SR': '⚔️ 鋼鉄のつるぎ',
-        'R': '🛡️ 木のたて',
-        'N': '🧹 ただのほうき',
+
+    rewards = {
+        'SSR': ('💎 伝説のまるもねソード', 100000),
+        'SR': ('⚔️ 鋼鉄のつるぎ', 10000),
+        'R': ('🛡️ 木のたて', 1000),
+        'N': ('🧹 ただのほうき', 100),
     }
+
+    item, money = rewards[rarity]
     await interaction.response.send_message(
-        f'🎁 ガチャ結果: **[{rarity}] {items[rarity]}** を獲得した！',
+        f'🎁 ガチャ結果: **[{rarity}] {item}**\n💰 獲得賞金: **{money:,} まるもね** ゲット！',
         ephemeral=True,
     )
 
 
-# --- 4. ボタン式くじ引きのViewクラス ---
+# --- 4. ボタン式くじ引きのViewクラス (報酬金額反映) ---
 class KujibikiView(discord.ui.View):
 
   def __init__(self):
@@ -86,17 +97,18 @@ class KujibikiView(discord.ui.View):
       self, interaction: discord.Interaction, button: discord.ui.Button
   ):
     fortunes = [
-        '🌟 特賞：まるちき鯖の主！',
-        '💎 大当たり：激レアアイテム獲得！',
-        '🎉 吉：いいことあるかも！',
-        '✨ 中吉：普段通りの平穏な一日',
-        '💧 小吉：ちょっとしたラッキー',
-        '🍃 末吉：慎重に行こう',
-        '💀 ざんねん：ハズレ…',
+        ('🌟 特賞：まるちき鯖の主！', 100000),
+        ('💎 大当たり：激レア！', 50000),
+        ('🎉 吉：いいことあるかも！', 5000),
+        ('✨ 中吉：普段通りの平穏', 1000),
+        ('💧 小吉：ちょっとしたラッキー', 500),
+        ('🍃 末吉：慎重に行こう', 100),
+        ('💀 ざんねん：ハズレ…', 0),
     ]
-    result = random.choice(fortunes)
+    result_text, money = random.choice(fortunes)
     await interaction.response.send_message(
-        f'🎟️ くじの結果：**{result}**', ephemeral=True
+        f'🎟️ くじの結果: **{result_text}**\n💰 獲得賞金: **{money:,} まるもね** ゲット！',
+        ephemeral=True,
     )
 
 
@@ -116,16 +128,16 @@ async def gacha(interaction: discord.Interaction):
 )
 async def work(interaction: discord.Interaction):
   jobs = [
-      ('モンスターを倒した', 500, 2000),
-      ('畑仕事を手伝った', 100, 500),
-      ('ダンジョンから生還した', 1000, 5000),
-      ('お店の店番をした', 200, 800),
-      ('スライムの世話をした', 50, 300),
+      ('モンスターを倒した', 5000, 20000),
+      ('ダンジョンから生還した', 10000, 50000),
+      ('お店の店番をした', 1000, 5000),
+      ('畑仕事を手伝った', 500, 2000),
+      ('スライムの世話をした', 100, 500),
   ]
   job_name, min_earn, max_earn = random.choice(jobs)
   earned = random.randint(min_earn, max_earn)
   await interaction.response.send_message(
-      f'💼 お仕事「{job_name}」を頑張った！\n報酬として **{earned} まるもね** をゲット！🎉'
+      f'💼 お仕事「{job_name}」を頑張った！\n💰 報酬として **{earned:,} まるもね** をゲット！🎉'
   )
 
 
@@ -150,9 +162,9 @@ async def slot(interaction: discord.Interaction):
   res = [random.choice(emojis) for _ in range(3)]
   msg = f'🎰 [{" | ".join(res)}]\n'
   if res[0] == res[1] == res[2]:
-    msg += '🎉 **ジャックポット！！大勝利！**'
+    msg += '🎉 **ジャックポット！！100,000まるもね獲得！**'
   elif res[0] == res[1] or res[1] == res[2] or res[0] == res[2]:
-    msg += '✨ **おしい！2つ揃った！**'
+    msg += '✨ **おしい！2つ揃った！ (5,000まるもね)**'
   else:
     msg += '😢 ハズレ！もう一回！'
   await interaction.response.send_message(msg)
@@ -182,7 +194,7 @@ async def rps(interaction: discord.Interaction, hand: app_commands.Choice[str]):
       or (user_hand == 'チョキ' and bot_hand == 'パー')
       or (user_hand == 'パー' and bot_hand == 'グー')
   ):
-    result = 'あなたの勝ち！🎉'
+    result = 'あなたの勝ち！🎉 (10,000まるもね)'
   else:
     result = 'Botの勝ち！🤖'
   await interaction.response.send_message(
@@ -327,8 +339,11 @@ mini_games_89 = {
 def register_mini_game(name, desc, title, choices):
   @bot.tree.command(name=name, description=desc)
   async def dynamic_mini_cmd(interaction: discord.Interaction):
+    # ミニゲームも当たったらボーナスまるもねが出るように！
+    bonus_money = random.choice([100, 500, 1000, 5000, 10000])
+    choice_result = random.choice(choices)
     await interaction.response.send_message(
-        f'{title}: **{random.choice(choices)}**'
+        f'{title}: **{choice_result}**\n💰 報酬: **{bonus_money:,} まるもね**'
     )
 
 
@@ -338,7 +353,7 @@ for cmd_name, (desc, title, choices) in mini_games_89.items():
 
 # --- 7. ボット起動 ---
 if __name__ == '__main__':
-  keep_alive()  # Webサーバーを起動
+  keep_alive()
   TOKEN = os.environ.get('DISCORD_BOT_TOKEN')
   if TOKEN:
     bot.run(TOKEN)
