@@ -188,7 +188,7 @@ class StatusView(discord.ui.View):
       )
       embed.set_footer(text='🟢 ステータスを表示させました！ (1秒ごとに自動更新中...)')
 
-      await self.message.edit(content='⚙️ ステータスを表示させました！', embed=embed, view=self)
+      await self.message.edit(embed=embed, view=self)
     except Exception:
       pass
 
@@ -487,12 +487,17 @@ async def balance(
     )
 
 
-# Botステータスコマンド（メッセージ＋1秒ごと自動更新）
+# Botステータスコマンド（みんなに公開＋自分だけに「ステータスを表示させました」＋1秒自動更新）
 @bot.tree.command(
     name='status',
-    description='Botのステータスを表示させました！(1秒ごとに自動更新)',
+    description='Botのステータスをみんなに公開表示します(1秒ごとに自動更新)',
 )
 async def status(interaction: discord.Interaction):
+  # 1. 実行した本人だけに「ステータスを表示させました」をこっそり送信
+  await interaction.response.send_message(
+      '⚙️ ステータスを表示させました！', ephemeral=True
+  )
+
   latency = round(bot.latency * 1000)
   process = psutil.Process(os.getpid())
   ram_mb = process.memory_info().rss / 1024 / 1024
@@ -523,23 +528,26 @@ async def status(interaction: discord.Interaction):
       value=f'`{len(bot.guilds)}` サーバー',
       inline=False,
   )
-  embed.set_footer(text='🟢 ステータスを表示させました！ (1秒ごとに自動更新中...)')
+  embed.set_footer(text='🟢 1秒ごとにリアルタイム更新中...')
 
-  await interaction.response.send_message(
-      '⚙️ ステータスを表示させました！', embed=embed, ephemeral=False
-  )
-  message = await interaction.original_response()
+  # 2. チャンネル全体（みんな）に向けて公開ステータスパネルを送信
+  message = await interaction.channel.send(embed=embed)
 
   StatusView(bot_instance=bot, message_to_edit=message)
 
 
-# 管理者専用ステータスコマンド（メッセージ＋自動1秒更新つき）
+# 管理者専用ステータスコマンド（自分だけにこっそり通知＋みんなに公開＋自動1秒更新）
 @bot.tree.command(
     name='admin-status',
-    description='【管理者用】Botの詳細ステータスを表示させます(1秒ごとに自動更新)',
+    description='【管理者用】Botの詳細ステータスをみんなに公開します(1秒ごとに自動更新)',
 )
 @app_commands.checks.has_permissions(administrator=True)
 async def admin_status(interaction: discord.Interaction):
+  # 1. 管理者本人だけにこっそり通知
+  await interaction.response.send_message(
+      '🛡️ 【管理者用】ステータスを表示させました！', ephemeral=True
+  )
+
   latency = round(bot.latency * 1000)
   process = psutil.Process(os.getpid())
   ram_mb = process.memory_info().rss / 1024 / 1024
@@ -573,14 +581,10 @@ async def admin_status(interaction: discord.Interaction):
       value=f'`{len(bot.guilds)}` サーバー',
       inline=False,
   )
-  embed.set_footer(
-      text='👑 管理者専用 | ステータスを表示させました！ (1秒ごとに自動更新中...)'
-  )
+  embed.set_footer(text='👑 管理者専用 | 1秒ごとに自動更新中...')
 
-  await interaction.response.send_message(
-      '🛡️ 【管理者用】ステータスを表示させました！', embed=embed, ephemeral=False
-  )
-  message = await interaction.original_response()
+  # 2. チャンネル全体（みんな）に向けて公開管理者ステータスを送信
+  message = await interaction.channel.send(embed=embed)
 
   StatusView(bot_instance=bot, message_to_edit=message)
 
