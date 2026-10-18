@@ -397,7 +397,7 @@ async def help_command(interaction: discord.Interaction):
           '• `/choice` - 複数の選択肢からランダムに1つ選ぶ\n'
           '• `/minigame` - 140個のミニゲームから番号を指定して遊ぶ！\n\n'
           '⚙️ **システム・管理系**\n'
-          '• `/status` - Botのステータス（みんなに見える公開表示）\n'
+          '• `/status` - Botのステータス（みんなに見える公開・1秒自動更新）\n'
           '• `/admin-status` - 【管理者用】詳細ステータス（自動更新付き）\n'
           '• `/help` - このヘルプを表示'
       ),
@@ -529,12 +529,16 @@ async def balance(
     )
 
 
-# Botステータスコマンド（みんなに見える公開表示版）
+# Botステータスコマンド（みんなに見える公開表示 ＆ 1秒ごと自動更新）
 @bot.tree.command(
     name='status',
-    description='Botの稼働時間(Uptime)、Ping値、RAM・CPU情報等をみんなに表示します',
+    description='Botの稼働時間(Uptime)やPing値をみんなに見えるように1秒ごとに自動更新します',
 )
 async def status(interaction: discord.Interaction):
+  # ご要望の「ステータスを表示させました」を先に送信、またはdeferで公開メッセージとして送信
+  await interaction.response.defer(ephemeral=False)
+  await interaction.followup.send('⚙️ ステータスを表示させました！', ephemeral=False)
+
   latency = round(bot.latency * 1000)
   process = psutil.Process(os.getpid())
   ram_mb = process.memory_info().rss / 1024 / 1024
@@ -565,19 +569,23 @@ async def status(interaction: discord.Interaction):
       value=f'`{len(bot.guilds)}` サーバー',
       inline=False,
   )
-  embed.set_footer(text=f'実行者: {interaction.user.name}')
+  embed.set_footer(text='🟢 1秒ごとにリアルタイム更新中...')
 
-  await interaction.response.send_message(embed=embed, ephemeral=False)
+  message = await interaction.followup.send(embed=embed, ephemeral=False)
+  StatusView(bot_instance=bot, message_to_edit=message)
 
 
 # 管理者専用ステータスコマンド（自動1秒更新つき）
 @bot.tree.command(
     name='admin-status',
-    description='【管理者用】Botの詳細ステータスを1秒ごとに自動更新します',
+    description='【管理者用】Botの詳細ステータスをみんなに公開し、1秒ごとに自動更新します',
 )
 @app_commands.checks.has_permissions(administrator=True)
 async def admin_status(interaction: discord.Interaction):
   await interaction.response.defer(ephemeral=False)
+  await interaction.followup.send(
+      '🛡️ 【管理者用】リアルタイムステータスを表示させました！', ephemeral=False
+  )
 
   latency = round(bot.latency * 1000)
   process = psutil.Process(os.getpid())
@@ -612,9 +620,7 @@ async def admin_status(interaction: discord.Interaction):
       value=f'`{len(bot.guilds)}` サーバー',
       inline=False,
   )
-  embed.set_footer(
-      text=f'👑 管理者専用 | 1秒ごとに自動更新中... (実行者: {interaction.user.name})'
-  )
+  embed.set_footer(text='👑 管理者専用 | 1秒ごとに自動更新中...')
 
   message = await interaction.followup.send(embed=embed, ephemeral=False)
   StatusView(bot_instance=bot, message_to_edit=message)
