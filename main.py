@@ -5,7 +5,7 @@ import threading
 import time
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 from flask import Flask
 import psutil
 
@@ -15,7 +15,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-  return 'まるちき鯖 Game Bot is running!'
+  return 'まるちき鯖 Game Bot (140+ Games Edition) is running!'
 
 
 def run():
@@ -37,6 +37,9 @@ bot = commands.Bot(command_prefix='/', intents=intents)
 # ユーザーデータ（所持金＆ワークの最終実行日時）
 user_balance = {}  # {user_id: 所持金}
 work_cooldown = {}  # {user_id: 最終実行タイムスタンプ}
+
+# Botの起動時刻（Uptime計測用）
+bot_start_time = time.time()
 
 
 def get_balance(user_id: int) -> int:
@@ -123,7 +126,7 @@ class SlotPanelView(discord.ui.View):
     new_balance = get_balance(interaction.user.id)
 
     embed = discord.Embed(
-        title='🎰 スロットパネルを設置しました！',
+        title=f'🎰 {self.author.name} さんのスロットパネル',
         description=(
             f'```\n{panel_display}\n```\n{msg}\n\n'
             f'👛 **現在の所持金:** {new_balance:,} まるもね\n'
@@ -135,15 +138,74 @@ class SlotPanelView(discord.ui.View):
     await interaction.response.edit_message(embed=embed, view=self)
 
 
-# --- 4. ステータス表示 View クラス ---
+# --- 4. ステータス表示 View クラス（1秒ごとに自動更新するループ対応） ---
 class StatusView(discord.ui.View):
 
-  def __init__(self, bot_instance):
+  def __init__(self, bot_instance, message_to_edit=None):
     super().__init__(timeout=180)
     self.bot = bot_instance
+    self.message = message_to_edit
+    self.is_running = True
+    # バックグラウンドで1秒ごとにステータスを書き換えるタスクを開始
+    self.update_task.start()
+
+  def interaction_check(self, interaction: discord.Interaction) -> bool:
+    return True
+
+  @tasks.loop(seconds=1.0)
+  async def update_task(self):
+    if not self.is_running or not self.message:
+      return
+    try:
+      latency = round(self.bot.latency * 1000)
+      process = psutil.Process(os.getpid())
+      ram_mb = process.memory_info().rss / 1024 / 1024
+      cpu_percent = psutil.cpu_percent()
+
+      uptime_seconds = int(time.time() - bot_start_time)
+      days = uptime_seconds // 86400
+      hours = (uptime_seconds % 86400) // 3600
+      minutes = (uptime_seconds % 3600) // 60
+      seconds = uptime_seconds % 60
+
+      if days > 0:
+        uptime_str = f'`{days}日 {hours}時間 {minutes}分 {seconds}秒`'
+      else:
+        uptime_str = f'`{hours}時間 {minutes}分 {seconds}秒`'
+
+      embed = discord.Embed(title='⚙️ Bot ステータス情報', color=discord.Color.blue())
+      embed.add_field(name='⏱️ 稼働時間 (Uptime)', value=uptime_str, inline=False)
+      embed.add_field(name='🏓 応答速度 (Ping)', value=f'`{latency} ms`', inline=True)
+      embed.add_field(
+          name='💾 RAM 使用量', value=f'`{ram_mb:.2f} MB`', inline=True
+      )
+      embed.add_field(
+          name='🖥️ CPU 使用率', value=f'`{cpu_percent:.1f} %`', inline=True
+      )
+      embed.add_field(
+          name='🌐 参加サーバー数',
+          value=f'`{len(self.bot.guilds)}` サーバー',
+          inline=False,
+      )
+      embed.set_footer(text='🟢 1秒ごとにリアルタイム更新中...')
+
+      await self.message.edit(embed=embed, view=self)
+    except Exception:
+      pass
+
+  async def on_timeout(self):
+    self.is_running = False
+    self.update_task.cancel()
+    for child in self.children:
+      child.disabled = True
+    try:
+      if self.message:
+        await self.message.edit(view=self)
+    except Exception:
+      pass
 
   @discord.ui.button(
-      label='🔄 ステータスを更新',
+      label='🔄 今すぐ手動更新',
       style=discord.ButtonStyle.secondary,
       custom_id='refresh_status_button',
   )
@@ -155,7 +217,19 @@ class StatusView(discord.ui.View):
     ram_mb = process.memory_info().rss / 1024 / 1024
     cpu_percent = psutil.cpu_percent()
 
+    uptime_seconds = int(time.time() - bot_start_time)
+    days = uptime_seconds // 86400
+    hours = (uptime_seconds % 86400) // 3600
+    minutes = (uptime_seconds % 3600) // 60
+    seconds = uptime_seconds % 60
+
+    if days > 0:
+      uptime_str = f'`{days}日 {hours}時間 {minutes}分 {seconds}秒`'
+    else:
+      uptime_str = f'`{hours}時間 {minutes}分 {seconds}秒`'
+
     embed = discord.Embed(title='⚙️ Bot ステータス情報', color=discord.Color.blue())
+    embed.add_field(name='⏱️ 稼働時間 (Uptime)', value=uptime_str, inline=False)
     embed.add_field(name='🏓 応答速度 (Ping)', value=f'`{latency} ms`', inline=True)
     embed.add_field(
         name='💾 RAM 使用量', value=f'`{ram_mb:.2f} MB`', inline=True
@@ -168,7 +242,7 @@ class StatusView(discord.ui.View):
         value=f'`{len(self.bot.guilds)}` サーバー',
         inline=False,
     )
-    embed.set_footer(text='ボタンを押すと最新のステータスに更新されます')
+    embed.set_footer(text='🟢 1秒ごとにリアルタイム更新中...')
 
     await interaction.response.edit_message(embed=embed, view=self)
 
@@ -303,13 +377,42 @@ class KujibikiView(discord.ui.View):
 # --- 6. スラッシュコマンドの実装 ---
 
 
+# ヘルプコマンド (/help)
+@bot.tree.command(name='help', description='Botのコマンド一覧と使い方を表示します')
+async def help_command(interaction: discord.Interaction):
+  embed = discord.Embed(
+      title='📖 まるちき鯖 Game Bot ヘルプ',
+      description=(
+          '当ボットの主なスラッシュコマンド一覧です！\n\n'
+          '💰 **経済・エコノミー系**\n'
+          '• `/slot` - スロットパネルを設置して大金を狙う\n'
+          '• `/work` - 24時間に1回お仕事をして「まるもね」を稼ぐ\n'
+          '• `/balance` - 自分または指定メンバーの所持金を確認\n'
+          '• `/marumone-okanemotirannkinngu` - お金持ちランキングTOP10を表示\n\n'
+          '🎮 **ミニゲーム・運試し系**\n'
+          '• `/gacha` - 装備ガチャを引く\n'
+          '• `/kujibiki` - くじ引きで運試し\n'
+          '• `/dice` - サイコロを振る (1〜6)\n'
+          '• `/coin` - コイントス\n'
+          '• `/rps` - じゃんけん勝負\n'
+          '• `/choice` - 複数の選択肢からランダムに1つ選ぶ (例: `りんご ばなな カレー`)\n'
+          '• `game1` 〜 `game140` - 多彩な140個のミニゲームコマンド！\n\n'
+          '⚙️ **システム系**\n'
+          '• `/status` - BotのリアルタイムUptime・Ping・リソース状況を表示\n'
+          '• `/help` - このヘルプを表示'
+      ),
+      color=discord.Color.blurple(),
+  )
+  await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
 # スロット設置コマンド
 @bot.tree.command(name='slot', description='スロットパネルを回して大金を狙おう！')
 async def slot(interaction: discord.Interaction):
   view = SlotPanelView(author=interaction.user)
   money = get_balance(interaction.user.id)
   embed = discord.Embed(
-      title='🎰 スロットパネルを設置しました！',
+      title=f'🎰 {interaction.user.name} さんのスロットパネル',
       description=(
           '【配当表】\n'
           '7️⃣ 7️⃣ 7️⃣ : **100,000 まるもね**\n'
@@ -317,11 +420,12 @@ async def slot(interaction: discord.Interaction):
           '2つ一致 : **5,000 まるもね**\n\n'
           '🪙 プレイ料金: **1回 1,000 まるもね**\n'
           f'👛 あなたの所持金: **{money:,} まるもね**\n\n'
+          f'※このパネルは {interaction.user.mention} さんだけが操作できます。\n'
           '下のボタンを押してスタートしてね！'
       ),
       color=discord.Color.gold(),
   )
-  await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+  await interaction.response.send_message(embed=embed, view=view, ephemeral=False)
 
 
 # お仕事コマンド（24時間制限付き）
@@ -333,7 +437,6 @@ async def work(interaction: discord.Interaction):
   now = time.time()
   cooldown_seconds = 24 * 3600  # 24時間 (86,400秒)
 
-  # 24時間チェック
   if user_id in work_cooldown:
     elapsed = now - work_cooldown[user_id]
     if elapsed < cooldown_seconds:
@@ -347,7 +450,6 @@ async def work(interaction: discord.Interaction):
       )
       return
 
-  # お仕事の実行処理
   jobs = [
       ('モンスターを倒した', 5000, 20000),
       ('ダンジョンから生還した', 10000, 50000),
@@ -359,7 +461,7 @@ async def work(interaction: discord.Interaction):
   earned = random.randint(min_earn, max_earn)
 
   add_balance(user_id, earned)
-  work_cooldown[user_id] = now  # 実行日時を更新
+  work_cooldown[user_id] = now
   current_money = get_balance(user_id)
 
   await interaction.response.send_message(
@@ -427,19 +529,32 @@ async def balance(
     )
 
 
-# Botステータスコマンド
+# Botステータスコマンド（1秒ごとにリアルタイム更新）
 @bot.tree.command(
-    name='status', description='BotのPing値、RAM使用量、CPU情報等を確認します'
+    name='status',
+    description='Botの稼働時間(Uptime)、Ping値、RAM・CPU情報等をリアルタイム表示します',
 )
 async def status(interaction: discord.Interaction):
+  await interaction.response.defer(ephemeral=True)
+
   latency = round(bot.latency * 1000)
   process = psutil.Process(os.getpid())
   ram_mb = process.memory_info().rss / 1024 / 1024
   cpu_percent = psutil.cpu_percent()
 
-  view = StatusView(bot_instance=bot)
+  uptime_seconds = int(time.time() - bot_start_time)
+  days = uptime_seconds // 86400
+  hours = (uptime_seconds % 86400) // 3600
+  minutes = (uptime_seconds % 3600) // 60
+  seconds = uptime_seconds % 60
+
+  if days > 0:
+    uptime_str = f'`{days}日 {hours}時間 {minutes}分 {seconds}秒`'
+  else:
+    uptime_str = f'`{hours}時間 {minutes}分 {seconds}秒`'
 
   embed = discord.Embed(title='⚙️ Bot ステータス情報', color=discord.Color.blue())
+  embed.add_field(name='⏱️ 稼働時間 (Uptime)', value=uptime_str, inline=False)
   embed.add_field(name='🏓 応答速度 (Ping)', value=f'`{latency} ms`', inline=True)
   embed.add_field(
       name='💾 RAM 使用量', value=f'`{ram_mb:.2f} MB`', inline=True
@@ -452,11 +567,37 @@ async def status(interaction: discord.Interaction):
       value=f'`{len(bot.guilds)}` サーバー',
       inline=False,
   )
-  embed.set_footer(text='ボタンを押すと最新のステータスに更新されます')
+  embed.set_footer(text='🟢 1秒ごとにリアルタイム更新中...')
 
-  await interaction.response.send_message(
-      embed=embed, view=view, ephemeral=True
+  message = await interaction.followup.send(embed=embed, ephemeral=True)
+  StatusView(bot_instance=bot, message_to_edit=message)
+
+
+# 選択肢ランダム決定コマンド（choice）
+@bot.tree.command(
+    name='choice', description='指定した選択肢の中からランダムに1つ選びます'
+)
+@app_commands.describe(choices='スペース区切りで選択肢を入力 (例: りんご ばなな カレー)')
+async def choice(interaction: discord.Interaction, choices: str):
+  choices_list = [c for c in choices.replace(' ', ' ').replace(',', ' ').split(' ') if c]
+
+  if not choices_list:
+    await interaction.response.send_message(
+        '⚠️ 選択肢を正しく入力してください！（例: `/choice りんご ばなな カレー`）',
+        ephemeral=True,
+    )
+    return
+
+  selected = random.choice(choices_list)
+  embed = discord.Embed(
+      title='🎲 チョイス結果',
+      description=(
+          f'📥 **入力された選択肢:** {", ".join(choices_list)}\n\n'
+          f'✨ **選ばれたのは…:** **{selected}** 🎉'
+      ),
+      color=discord.Color.purple(),
   )
+  await interaction.response.send_message(embed=embed)
 
 
 # ガチャ＆くじ引きコマンド
@@ -533,8 +674,8 @@ async def rps(interaction: discord.Interaction, hand: app_commands.Choice[str]):
   )
 
 
-# --- 7. 89個のミニゲームコマンド群 ---
-mini_games_89 = {
+# --- 7. 140個のミニゲームコマンド群 ---
+mini_games_140 = {
     'game1': ('的当てゲーム', '🎯 的当て', ['中央命中！', '惜しくも外れ', 'かすり傷']),
     'game2': ('ボウリング', '🎳 ボウリング', ['ストライク！', 'スペア！', 'ガター…']),
     'game3': ('ダーツ勝負', '🎯 ダーツ', ['ブルズアイ！', '20トリプル', '1点']),
@@ -617,7 +758,7 @@ mini_games_89 = {
     'game40': ('ドラゴンの声', '🐉 モンスター', ['「我が力を授けよう」', '「眠い…」', '「挑むか人間よ」']),
     'game41': ('武器の叫び', '⚔️ 装備', ['「主よ、共に行こう」', '「少し錆びたか」', '「研ぎ澄まされし刃」']),
     'game42': ('盾の意思', '🛡️ 装備', ['「絶対に守り抜く」', '「少しひびが入った」', '「鉄壁の守り」']),
-    'game43': ('杖の魔力', '🪄 魔法', ['「マナがあふれる」', '「不発だ…」', '「大魔法発動」']),
+    'game43': ('杖の魔力', '🪄 魔法', ['「マナがあふれる」', '「不発だ…」', '│大魔法発動'],  # 短縮
     'game44': ('リンゴの運命', '🍎 フード', ['甘くて美味しい', '少し酸っぱい', '虫食いだった']),
     'game45': ('謎の箱', '📦 イベント', ['中身は宝石', 'ただの石', 'びっくり箱だった']),
     'game46': ('古文書解読', '📜 クエスト', ['解読成功！', '文字が消えている', '呪われた']),
@@ -664,6 +805,57 @@ mini_games_89 = {
     'game87': ('読書タイム', '📖 ブック', ['感動の結末', '難解な内容', '寝落ちした']),
     'game88': ('ペン書き', '🖋️ ステーショナリー', ['スラスラ書ける', 'インクが切れた', '落書きした']),
     'game89': ('パレットの色混ぜ', '🎨 アート', ['綺麗な色彩が生まれた', '絵の具が混ざりすぎた', '真っ黒になった']),
+    'game90': ('クリスタル採掘', '⛏️ 採掘', ['巨大な原石を発見！', '小さな破片', '岩盤だった']),
+    'game91': ('釣り大会', '🎣 釣り', ['主を釣り上げた！', 'タイをゲット', '長靴が釣れた']),
+    'game92': ('キノコ狩り', '🍄 森', ['高級マツタケ発見！', '普通のキノコ', '毒キノコだった']),
+    'game93': ('宝箱開封', '📦 冒険', ['レアアイテム獲得！', 'ゴールドが入っていた', 'ミミックだった！']),
+    'game94': ('スライム退治', '🟢 モンスター', ['一撃で倒した！', '分裂した', '逃げられた']),
+    'game95': ('ゴブリン討伐', '👺 モンスター', ['見事な勝利！', '苦戦した', '返り討ちにあった']),
+    'game96': ('ドラゴン討伐', '🐉 ボス', ['伝説の英雄となった！', 'HPが1残った', '全滅した…']),
+    'game97': ('ポーション調合', '🧪 錬金術', ['最高級エリクサー完成！', '普通の回復薬', '大爆発した']),
+    'game98': ('魔法陣起動', '✨ 魔法', ['古代魔法が発動！', '光っただけ', '魔力が暴走した']),
+    'game99': ('呪文詠唱', '📜 呪文', ['強力な呪文が成功！', '噛んでしまった', '効果なし']),
+    'game100': ('ダンジョン探索', '🗺️ 探索', ['隠し部屋を発見！', '罠にかかった', '行き止まり']),
+    'game101': ('次元の扉', '🌌 SF', ['別世界へワープ！', 'こちら側に引き戻された', '閉ざされていた']),
+    'game102': ('タイムリープ', '⏳ SF', ['過去の改変に成功', '未来へジャンプ', 'エラー発生']),
+    'game103': ('超能力開発', '🧠 超能力', ['スプーンが曲がった！', '集中力不足', '頭痛が起きた']),
+    'game104': ('念力勝負', '🔮 超能力', ['モノを浮かせた！', '微動だにしない', '疲れた']),
+    'game105': ('妖精との遭遇', '🧚 ファンタジー', ['祝福を授かった', 'イタズラされた', '隠れてしまった']),
+    'game106': ('精霊の加護', '🌿 ファンタジー', ['風の加護を得た', '見守られている', '気づかれなかった']),
+    'game107': ('悪魔の契約', '😈 ダーク', ['莫大な富を得た', '魂を少し奪われた', '契約拒否された']),
+    'game108': ('天使の羽音', '👼 セレスティアル', ['癒やしの光を浴びた', '優しい微笑み', '去っていった']),
+    'game109': ('神殿の祈り', '🏛️ 神聖', ['ご利益があった！', '静寂に包まれた', '眠くなった']),
+    'game110': ('呪いの人形', '🎎 ホラー', ['動き出した…！', '不気味に見つめる', 'ただの人形']),
+    'game111': ('ゾンビサバイバル', '🧟 ホラー', ['ヘッドショット！', '囲まれた', '逃げ切った']),
+    'game112': ('吸血鬼の晩餐', '🧛 ホラー', ['牙をかわした', '魅了された', '夜が明けた']),
+    'game113': ('狼男の遠吠え', '🐺 ホラー', ['月に向かって咆哮', '元に戻った', '眠気に勝てず']),
+    'game114': ('魔女の釜', '🧙 魔術', ['怪しげな薬ができた', '煙が噴き出した', '美味スープになった']),
+    'game115': ('錬金釜', '⚗️ 錬金', ['金塊が生成された！', '鉛になった', '消滅した']),
+    'game116': ('星座観測', '✨ 天体', ['新星を発見した', '流れ星にお願い', '雲が広がった']),
+    'game117': ('流星群鑑賞', '🌠 天体', ['大流星群を目撃！', '1個だけ見えた', '見逃した']),
+    'game118': ('ブラックホール', '🕳️ 宇宙', ['吸い込まれそうになった', '光が曲がる', '安定している']),
+    'game119': ('スーパーノヴァ', '🌟 宇宙', ['超新星爆発を目撃', 'エネルギー放射', '観測成功']),
+    'game120': ('ロケット発射', '🚀 宇宙', ['大気圏突破！', '第2段ロケット分離', 'カウントダウン中断']),
+    'game121': ('スペースウォーク', '👨‍🚀 宇宙', ['地球が青く見えた', 'コードが絡まった', '無重力満喫']),
+    'game122': ('火星移住計画', '🔴 宇宙', ['ドーム基地完成', '土壌サンプル採取', '砂嵐発生']),
+    'game123': ('月面基地', '🌕 宇宙', ['ウサギを見た気がする', 'クレーター探検', '重力に感動']),
+    'game124': ('異星人交流', '👽 SF', ['友好的な挨拶を交わした', 'テレパシー通信', '言葉が通じない']),
+    'game125': ('サイバーハッキング', '💻 ハック', ['メインフレーム侵入成功！', 'ファイアウォールに阻まれた', '逆探知された']),
+    'game126': ('AIブレイン', '🤖 AI', ['人工知能が進化！', 'バグ修正完了', '冗談を言ってきた']),
+    'game127': ('バーチャル空間', '🕶️ VR', ['フルダイブ成功', '現実世界へ帰還', 'グラフィック最高']),
+    'game128': ('サイボーグ化', '🦾 SF', ['身体能力が3倍に！', 'OSのアップデート', 'メンテナンス中']),
+    'game129': ('メカニック修理', '🔧 メカ', ['完璧に修理完了！', 'ネジが余った', 'さらに壊れた']),
+    'game130': ('ドローン操縦', '🚁 ガジェット', ['上空からの撮影成功', '木に激突した', 'バッテリー切れ']),
+    'game131': ('ラジコンレース', '🏎️ ガジェット', ['ドリフト走行きまった！', 'コースアウト', '横転した']),
+    'game132': ('ミニ四駆改造', '⚡ ガジェット', ['超速モーター炸裂！', 'ギアが噛み合った', 'コースから飛んだ']),
+    'game133': ('カードバトル', '🃏 カード', ['究極コンボ炸裂！', '手札が事故った', '逆転勝利！']),
+    'game134': ('ボードゲーム', '🎲 ボドゲ', ['サイコロの目が神がかってた', 'マス戻る…', '大逆転勝利']),
+    'game135': ('人生ゲーム', '💸 ボドゲ', ['大富豪になった！', '借金を背負った', '平穏な人生']),
+    'game136': ('人狼ゲーム', '🐺 ボドゲ', ['見事に村人を欺いた', '初日噛みされた', '人狼を見破った！']),
+    'game137': ('TRPG冒険', '🎲 ボドゲ', ['クリティカルヒット！', 'ファンブル…', '伝説のシナリオクリア']),
+    'game138': ('謎解き脱出', '🗝️ ゲーム', ['制限時間ギリギリ脱出！', '謎が解けず閉じ込められた', 'ヒントでクリア']),
+    'game139': ('クイズ大会', '❓ クイズ', ['全問正解！', '最後の問題でミス', '分からなかった']),
+    'game140': ('エンディングロール', '🎬 総合', ['素晴らしい冒険だった！', 'スタッフロールが流れる', 'つづく…']),
 }
 
 
@@ -678,7 +870,7 @@ def register_mini_game(name, desc, title, choices):
     )
 
 
-for cmd_name, (desc, title, choices) in mini_games_89.items():
+for cmd_name, (desc, title, choices) in mini_games_140.items():
   register_mini_game(cmd_name, desc, title, choices)
 
 
