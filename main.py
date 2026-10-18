@@ -186,9 +186,9 @@ class StatusView(discord.ui.View):
           value=f'`{len(self.bot.guilds)}` サーバー',
           inline=False,
       )
-      embed.set_footer(text='🟢 1秒ごとにリアルタイム更新中...')
+      embed.set_footer(text='🟢 ステータスを表示させました！ (1秒ごとに自動更新中...)')
 
-      await self.message.edit(embed=embed, view=self)
+      await self.message.edit(content='⚙️ ステータスを表示させました！', embed=embed, view=self)
     except Exception:
       pass
 
@@ -487,7 +487,7 @@ async def balance(
     )
 
 
-# Botステータスコマンド（みんなに見える公開表示 ＆ 1秒ごと自動更新）
+# Botステータスコマンド（メッセージ＋1秒ごと自動更新）
 @bot.tree.command(
     name='status',
     description='Botのステータスを表示させました！(1秒ごとに自動更新)',
@@ -525,13 +525,15 @@ async def status(interaction: discord.Interaction):
   )
   embed.set_footer(text='🟢 ステータスを表示させました！ (1秒ごとに自動更新中...)')
 
-  await interaction.response.send_message(embed=embed, ephemeral=False)
+  await interaction.response.send_message(
+      '⚙️ ステータスを表示させました！', embed=embed, ephemeral=False
+  )
   message = await interaction.original_response()
 
   StatusView(bot_instance=bot, message_to_edit=message)
 
 
-# 管理者専用ステータスコマンド（自動1秒更新つき）
+# 管理者専用ステータスコマンド（メッセージ＋自動1秒更新つき）
 @bot.tree.command(
     name='admin-status',
     description='【管理者用】Botの詳細ステータスを表示させます(1秒ごとに自動更新)',
@@ -575,7 +577,9 @@ async def admin_status(interaction: discord.Interaction):
       text='👑 管理者専用 | ステータスを表示させました！ (1秒ごとに自動更新中...)'
   )
 
-  await interaction.response.send_message(embed=embed, ephemeral=False)
+  await interaction.response.send_message(
+      '🛡️ 【管理者用】ステータスを表示させました！', embed=embed, ephemeral=False
+  )
   message = await interaction.original_response()
 
   StatusView(bot_instance=bot, message_to_edit=message)
