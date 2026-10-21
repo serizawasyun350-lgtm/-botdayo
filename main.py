@@ -264,14 +264,32 @@ class PublicAllPanelView(discord.ui.View):
     add_balance(interaction.user.id, -cost)
     emojis = ['🍒', '🍋', '🔔', '⭐', '💎', '7️⃣']
     res = [random.choice(emojis) for _ in range(3)]
-    prize = 100000 if res[0] == res[1] == res[2] == '7️⃣' else 0
+    panel = f'| {res[0]} | {res[1]} | {res[2]} |'
+
+    prize = 0
+    if res[0] == res[1] == res[2]:
+      prize = 100000 if res[0] == '7️⃣' else 50000
+      msg = f'🎉 **ジャックポット達成！！** (＋{prize:,} まるもね)'
+    elif res[0] == res[1] or res[1] == res[2] or res[0] == res[2]:
+      prize = 5000
+      msg = f'✨ **2つ揃いました！** (＋{prize:,} まるもね)'
+    else:
+      msg = '😢 残念ハズレ！'
+
     if prize > 0:
       add_balance(interaction.user.id, prize)
 
-    await interaction.response.send_message(
-        f'{interaction.user.mention} 🎰 [ {res[0]} | {res[1]} | {res[2]} ] '
-        f'賞金: {prize:,} まるもね'
+    embed = discord.Embed(
+        title='🎰 総合パネル - スロット結果',
+        description=(
+            f'{interaction.user.mention} がスロットを回した！\n'
+            f'```\n{panel}\n```\n'
+            f'{msg}\n'
+            f'👛 所持金: **{get_balance(interaction.user.id):,} まるもね**'
+        ),
+        color=discord.Color.gold(),
     )
+    await interaction.response.send_message(embed=embed)
 
   @discord.ui.button(
       label='✨ ガチャ (300)',
@@ -288,10 +306,29 @@ class PublicAllPanelView(discord.ui.View):
       )
       return
     add_balance(interaction.user.id, -cost)
-    add_balance(interaction.user.id, 500)
-    await interaction.response.send_message(
-        f'{interaction.user.mention} ✨ ガチャを引いて 500 まるもねを獲得！'
+    rarity = random.choices(
+        ['SSR', 'SR', 'R', 'N'], weights=[3, 12, 35, 50], k=1
+    )[0]
+    rewards = {
+        'SSR': ('💎 伝説のまるもねソード', 100000),
+        'SR': ('⚔️ 鋼鉄のつるぎ', 10000),
+        'R': ('🛡️ 木のたて', 1000),
+        'N': ('🧹 ただのほうき', 100),
+    }
+    item, money = rewards[rarity]
+    add_balance(interaction.user.id, money)
+
+    embed = discord.Embed(
+        title='✨ 総合パネル - ガチャ結果',
+        description=(
+            f'{interaction.user.mention} がガチャを引いた！\n'
+            f'🎁 結果: **[{rarity}] {item}**\n'
+            f'💰 獲得: **+{money:,} まるもね**\n'
+            f'👛 所持金: **{get_balance(interaction.user.id):,} まるもね**'
+        ),
+        color=discord.Color.blue(),
     )
+    await interaction.response.send_message(embed=embed)
 
   @discord.ui.button(
       label='🎲 カジノ (自由)',
@@ -322,11 +359,17 @@ class GameSelect(discord.ui.Select):
   async def callback(self, interaction: discord.Interaction):
     reward = random.choice([100, 500, 1000, 5000])
     add_balance(interaction.user.id, reward)
-    await interaction.response.send_message(
-        f'🎮 **{self.values[0]}** をプレイした！\n💰 報酬:'
-        f' **+{reward:,} まるもね** 獲得！',
-        ephemeral=True,
+
+    embed = discord.Embed(
+        title='🎮 ミニゲーム結果',
+        description=(
+            f'{interaction.user.mention} が **{self.values[0]}** をプレイした！\n'
+            f'💰 報酬: **+{reward:,} まるもね** 獲得！\n'
+            f'👛 所持金: **{get_balance(interaction.user.id):,} まるもね**'
+        ),
+        color=discord.Color.purple(),
     )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 class GameSelectView(discord.ui.View):
@@ -363,10 +406,16 @@ async def work(interaction: discord.Interaction):
   add_balance(user_id, earned)
   work_cooldowns[user_id] = now + timedelta(hours=24)
 
-  await interaction.response.send_message(
-      f'💼 お仕事を頑張った！\n💰 報酬: **+{earned:,} まるもね**\n👛 所持金:'
-      f' **{get_balance(user_id):,} まるもね**'
+  embed = discord.Embed(
+      title='💼 お仕事結果',
+      description=(
+          f'{interaction.user.mention} お仕事を頑張った！\n'
+          f'💰 報酬: **+{earned:,} まるもね**\n'
+          f'👛 所持金: **{get_balance(user_id):,} まるもね**'
+      ),
+      color=discord.Color.green(),
   )
+  await interaction.response.send_message(embed=embed)
 
 
 # パネル設置コマンド群 (本人には設置通知、チャットにはパネルを配置)
@@ -444,10 +493,16 @@ async def pay(
 
   add_balance(interaction.user.id, -amount)
   add_balance(target.id, amount)
-  await interaction.response.send_message(
-      f'💸 {interaction.user.mention} から {target.mention} へ **{amount:,}'
-      ' まるもね** を送金しました！'
+
+  embed = discord.Embed(
+      title='💸 送金完了',
+      description=(
+          f'{interaction.user.mention} から {target.mention} へ\n'
+          f'**{amount:,} まるもね** を送金しました！'
+      ),
+      color=discord.Color.orange(),
   )
+  await interaction.response.send_message(embed=embed)
 
 
 # 管理者限定: 全員に入金
@@ -460,9 +515,15 @@ async def admin_add_all(interaction: discord.Interaction, amount: int):
   for member in interaction.guild.members:
     if not member.bot:
       add_balance(member.id, amount)
-  await interaction.response.send_message(
-      f'👑 管理者権限: サーバーの全員に **+{amount:,} まるもね** を配布しました！'
+
+  embed = discord.Embed(
+      title='👑 管理者配布',
+      description=(
+          f'サーバーの全員に **+{amount:,} まるもね** を配布しました！'
+      ),
+      color=discord.Color.red(),
   )
+  await interaction.response.send_message(embed=embed)
 
 
 # まるもねーパス & ++ 設定コマンド (管理者限定)
@@ -491,10 +552,16 @@ async def set_pass(
     pass_users[target.id] = 'まるもねーパス'
 
   add_balance(target.id, amount)
-  await interaction.response.send_message(
-      f'🎫 {target.mention} に **【{pass_type.name}】** を付与し、**+{amount:,}'
-      ' まるもね** を支給しました！'
+
+  embed = discord.Embed(
+      title='🎫 パス付与完了',
+      description=(
+          f'{target.mention} に **【{pass_type.name}】** を付与し、\n'
+          f'**+{amount:,} まるもね** を支給しました！'
+      ),
+      color=discord.Color.gold(),
   )
+  await interaction.response.send_message(embed=embed)
 
 
 # パス加入確認コマンド
