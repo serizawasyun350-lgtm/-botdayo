@@ -8,7 +8,7 @@ from discord.ext import commands
 from flask import Flask
 import psutil
 
-# --- 1. UptimeRobot用のWebサーバー (Render常時起動用) ---
+# --- 1. UptimeRobot用 Webサーバー ---
 app = Flask('')
 
 
@@ -27,15 +27,15 @@ def keep_alive():
   t.start()
 
 
-# --- 2. Discord Botとデータ管理の設定 ---
+# --- 2. Discord Bot 設定 ---
 intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix='/', intents=intents)
 
-# ユーザーデータストレージ
-user_balance = {}  # 所持金
-work_cooldowns = {}  # workコマンドの24時間クールダウン
+# ユーザーデータ保持 (所持金 & workの次回利用可能時刻)
+user_balance = {}
+work_cooldowns = {}
 
 
 def get_balance(user_id: int) -> int:
@@ -55,49 +55,140 @@ async def on_ready():
     synced = await bot.tree.sync()
     print(f'スラッシュコマンドを {len(synced)} 個同期しました！')
   except Exception as e:
-    print(f'同期エラーが発生しました: {e}')
+    print(f'同期エラー: {e}')
 
 
-# --- 3. スロットパネル View（誰でも回せる・別メッセージで結果表示） ---
-class SlotPanelView(discord.ui.View):
+# --- 3. カジノ用 掛け金入力ダイアログ (Modal UI) ---
+class CasinoModal(discord.ui.Modal, title='🎰 カジノ - 掛け金設定'):
 
-  def __init__(self):
-    super().__init__(timeout=None)  # 永続パネル
-    self.last_click = {}  # 429対策連打防止用
+  def __init__(self, is_fixed: bool):
+    super().__init__()
+    self.is_fixed = is_fixed
+
+  bet_amount = discord.ui.TextInput(
+      label='賭けるまるもねの額を入力してください',
+      placeholder='例: 1000',
+      min_length=1,
+      max_length=10,
+      required=True,
+  )
+
+  async def on_submit(self, interaction: discord.Interaction):
+    try:
+      amount = int(self.bet_amount.value)
+      if amount <= 0:
+        await interaction.response.send_message(
+            '⚠️ 1以上のまるもねを指定してください！', ephemeral=True
+        )
+        return
+    except ValueError:
+      await interaction.response.send_message(
+          '⚠️ 数字を入力してください！', ephemeral=True
+      )
+      return
+
+    user_id = interaction.user.id
+    current_money = get_balance(user_id)
+
+    if current_money < amount:
+      await interaction.response.send_message(
+          f'⚠️ まるもねが足りません！（所持金: {current_money:,} まるもね）',
+          ephemeral=True,
+      )
+      return
+
+    # 勝敗判定 (勝率 45%)
+    is_win = random.random() < 0.45
+    if is_win:
+      win_money = amount * 2
+      add_balance(user_id, amount)
+      result_msg = (
+          f'🎉 **大勝利！**\n賭け金: {amount:,} まるもね\n獲得:'
+          f' **+{win_money:,} まるもね**'
+      )
+      color = discord.Color.green()
+    else:
+      add_balance(user_id, -amount)
+      result_msg = (
+          f'💀 **敗北…**\n賭け金 **{amount:,} まるもね** を失いました…'
+      )
+      color = discord.Color.red()
+
+    new_money = get_balance(user_id)
+
+    # 結果埋め込み（全員が見える公開メッセージ）
+    res_embed = discord.Embed(
+        title='🎲 カジノ勝負結果',
+        description=(
+            f'{interaction.user.mention} さんの勝負！\n{result_msg}\n\n👛'
+            f' 現在の所持金: **{new_money:,} まるもね**'
+        ),
+        color=color,
+    )
+    await interaction.response.send_message(embed=res_embed)
+
+    # 固定パネル処理（設定がTrueの場合、下に移動設置）
+    if self.is_fixed:
+      try:
+        await interaction.message.delete()
+      except Exception:
+        pass
+      new_view = CasinoPanelView(is_fixed=True)
+      panel_embed = discord.Embed(
+          title='🎰 カジノパネルを設置しました！',
+          description='下の「かける」ボタンを押して勝負しよう！',
+          color=discord.Color.purple(),
+      )
+      await interaction.channel.send(embed=panel_embed, view=new_view)
+
+
+# --- 4. パネル用 View クラス群 ---
+
+# ① カジノパネル View
+class CasinoPanelView(discord.ui.View):
+
+  def __init__(self, is_fixed: bool = False):
+    super().__init__(timeout=None)
+    self.is_fixed = is_fixed
 
   @discord.ui.button(
-      label='🎰 スロットを回す！ (1,000まるもね)',
+      label='かける',
+      style=discord.ButtonStyle.success,
+      custom_id='casino_bet_button',
+  )
+  async def bet_button(
+      self, interaction: discord.Interaction, button: discord.ui.Button
+  ):
+    await interaction.response.send_modal(CasinoModal(is_fixed=self.is_fixed))
+
+
+# ② スロットパネル View
+class SlotPanelView(discord.ui.View):
+
+  def __init__(self, is_fixed: bool = False):
+    super().__init__(timeout=None)
+    self.is_fixed = is_fixed
+
+  @discord.ui.button(
+      label='🎰 パネルを回す！ (1,000まるもね)',
       style=discord.ButtonStyle.danger,
-      custom_id='spin_slot_panel_button',
+      custom_id='spin_slot_button',
   )
   async def spin_button(
       self, interaction: discord.Interaction, button: discord.ui.Button
   ):
-    # 429 Rate Limit対策 (1秒以内の連打制限)
-    now = time.time() if 'time' in globals() else datetime.datetime.now().timestamp()
-    if (
-        interaction.user.id in self.last_click
-        and now - self.last_click[interaction.user.id] < 2.0
-    ):
-      await interaction.response.send_message(
-          '⚠️ ちょっとリクエストが多すぎるからしばらく待ってね（エラーコード429防止）',
-          ephemeral=True,
-      )
-      return
-    self.last_click[interaction.user.id] = now
-
     cost = 1000
-    current_money = get_balance(interaction.user.id)
+    user_id = interaction.user.id
+    current_money = get_balance(user_id)
 
     if current_money < cost:
       await interaction.response.send_message(
-          f'⚠️ まるもねが足りません！（所持金: {current_money:,} まるもね / 必要:'
-          f' {cost:,} まるもね）\n`/work` で稼いできてね！',
+          f'⚠️ まるもねが足りません！（所持金: {current_money:,} まるもね）',
           ephemeral=True,
       )
       return
 
-    add_balance(interaction.user.id, -cost)
+    add_balance(user_id, -cost)
 
     emojis = ['🍒', '🍋', '🔔', '⭐', '💎', '7️⃣']
     res = [random.choice(emojis) for _ in range(3)]
@@ -107,87 +198,78 @@ class SlotPanelView(discord.ui.View):
     if res[0] == res[1] == res[2]:
       if res[0] == '7️⃣':
         prize = 100000
-        msg = (
-            '🎉 **超ジャックポット！！777達成！**\n💰'
-            f' **+{prize:,} まるもね** 獲得！'
-        )
+        msg = f'🎉 **超ジャックポット！！777達成！**\n💰 **+{prize:,} まるもね**'
       else:
         prize = 50000
-        msg = f'🎉 **ジャックポット達成！**\n💰 **+{prize:,} まるもね** 獲得！'
+        msg = f'🎉 **ジャックポット達成！**\n💰 **+{prize:,} まるもね**'
     elif res[0] == res[1] or res[1] == res[2] or res[0] == res[2]:
       prize = 5000
-      msg = f'✨ **2つ揃いました！**\n💰 **+{prize:,} まるもね** 獲得！'
+      msg = f'✨ **2つ揃いました！**\n💰 **+{prize:,} まるもね**'
     else:
       msg = '😢 残念！ハズレです…'
 
     if prize > 0:
-      add_balance(interaction.user.id, prize)
+      add_balance(user_id, prize)
 
-    new_balance = get_balance(interaction.user.id)
+    new_balance = get_balance(user_id)
 
-    # 別エンベッドで結果を送信（全員に見える）
+    # 結果埋め込み（全員公開）
     res_embed = discord.Embed(
-        title=f'🎰 {interaction.user.display_name} さんのスロット結果',
+        title='🎰 スロット結果',
         description=(
-            f'```\n{panel_display}\n```\n{msg}\n👛 **現在の所持金:**'
-            f' {new_balance:,} まるもね'
+            f'{interaction.user.mention} さんの結果:\n```\n{panel_display}\n```\n{msg}\n\n👛'
+            f' **現在の所持金:** {new_balance:,} まるもね'
         ),
         color=discord.Color.gold(),
     )
     await interaction.response.send_message(embed=res_embed)
 
+    # 固定パネルを下に再設置
+    if self.is_fixed:
+      try:
+        await interaction.message.delete()
+      except Exception:
+        pass
+      new_view = SlotPanelView(is_fixed=True)
+      panel_embed = discord.Embed(
+          title='🎰 スロットパネルを設置しました！',
+          description='下の「🎰 パネルを回す！」ボタンを押してスタートしてね！',
+          color=discord.Color.gold(),
+      )
+      await interaction.channel.send(embed=panel_embed, view=new_view)
 
-# --- 4. ガチャパネル View（誰でも回せる・別メッセージで結果表示） ---
+
+# ③ ガチャパネル View
 class GachaPanelView(discord.ui.View):
 
-  def __init__(self):
+  def __init__(self, is_fixed: bool = False):
     super().__init__(timeout=None)
-    self.last_click = {}
+    self.is_fixed = is_fixed
 
   @discord.ui.button(
       label='✨ ガチャを回す！ (300まるもね)',
-      style=discord.ButtonStyle.blurple,
-      custom_id='gacha_panel_button',
+      style=discord.ButtonStyle.primary,
+      custom_id='spin_gacha_button',
   )
-  async def button_callback(
+  async def gacha_button(
       self, interaction: discord.Interaction, button: discord.ui.Button
   ):
-    now = datetime.datetime.now().timestamp()
-    if (
-        interaction.user.id in self.last_click
-        and now - self.last_click[interaction.user.id] < 2.0
-    ):
-      await interaction.response.send_message(
-          '⚠️ ちょっとリクエストが多すぎるからしばらく待ってね（エラーコード429防止）',
-          ephemeral=True,
-      )
-      return
-    self.last_click[interaction.user.id] = now
-
     cost = 300
-    current_money = get_balance(interaction.user.id)
+    user_id = interaction.user.id
+    current_money = get_balance(user_id)
 
     if current_money < cost:
       await interaction.response.send_message(
-          f'⚠️ まるもねが足りません！（所持金: {current_money:,} まるもね / 必要:'
-          f' {cost:,} まるもね）\n`/work` で稼いできてね！',
+          f'⚠️ まるもねが足りません！（所持金: {current_money:,} まるもね）',
           ephemeral=True,
       )
       return
 
-    add_balance(interaction.user.id, -cost)
+    add_balance(user_id, -cost)
 
-    rarity, weight = random.choices(
-        [
-            ('SSR', 3),
-            ('SR', 12),
-            ('R', 35),
-            ('N', 50),
-        ],
-        weights=[3, 12, 35, 50],
-        k=1,
+    rarity = random.choices(
+        ['SSR', 'SR', 'R', 'N'], weights=[3, 12, 35, 50], k=1
     )[0]
-
     rewards = {
         'SSR': ('💎 伝説のまるもねソード', 100000),
         'SR': ('⚔️ 鋼鉄のつるぎ', 10000),
@@ -196,164 +278,84 @@ class GachaPanelView(discord.ui.View):
     }
 
     item, money = rewards[rarity]
-    add_balance(interaction.user.id, money)
-    new_balance = get_balance(interaction.user.id)
+    add_balance(user_id, money)
+    new_balance = get_balance(user_id)
 
     res_embed = discord.Embed(
-        title=f'🎰 {interaction.user.display_name} さんのガチャ結果',
+        title='🎰 ガチャ結果',
         description=(
-            f'🎁 **[{rarity}] {item}** を獲得！\n💰 賞金:'
-            f' **+{money:,} まるもね**\n👛 **現在の所持金:**'
+            f'{interaction.user.mention} さんの結果:\n🎁 **[{rarity}] {item}**'
+            f' 獲得！\n💰 賞金: **+{money:,} まるもね**\n\n👛 **現在の所持金:**'
             f' {new_balance:,} まるもね'
         ),
         color=discord.Color.blue(),
     )
     await interaction.response.send_message(embed=res_embed)
 
-
-# --- 5. カジノ View（ドロップダウンで賭け金選択＋「かける」ボタン） ---
-class KajinoPanelView(discord.ui.View):
-
-  def __init__(self):
-    super().__init__(timeout=None)
-    self.selected_bet = 1000
-    self.last_click = {}
-
-  @discord.ui.select(
-      placeholder='何まるもねかけますか？',
-      options=[
-          discord.SelectOption(
-              label='100 まるもね', value='100', description='低リスクで勝負'
-          ),
-          discord.SelectOption(
-              label='1,000 まるもね', value='1000', description='標準ベット'
-          ),
-          discord.SelectOption(
-              label='5,000 まるもね', value='5000', description='高額ベット'
-          ),
-          discord.SelectOption(
-              label='10,000 まるもね', value='10000', description='一発逆転！'
-          ),
-      ],
-  )
-  async def select_callback(
-      self, interaction: discord.Interaction, select: discord.ui.Select
-  ):
-    self.selected_bet = int(select.values[0])
-    await interaction.response.send_message(
-        f'🎲 賭け金を **{self.selected_bet:,} まるもね** に設定しました！「かける」ボタンを押してね。',
-        ephemeral=True,
-    )
-
-  @discord.ui.button(
-      label='🔥 かける！',
-      style=discord.ButtonStyle.success,
-      custom_id='kajino_bet_button',
-  )
-  async def bet_button(
-      self, interaction: discord.Interaction, button: discord.ui.Button
-  ):
-    now = datetime.datetime.now().timestamp()
-    if (
-        interaction.user.id in self.last_click
-        and now - self.last_click[interaction.user.id] < 2.0
-    ):
-      await interaction.response.send_message(
-          '⚠️ ちょっとリクエストが多すぎるからしばらく待ってね（エラーコード429防止）',
-          ephemeral=True,
+    # 固定パネルを下に再設置
+    if self.is_fixed:
+      try:
+        await interaction.message.delete()
+      except Exception:
+        pass
+      new_view = GachaPanelView(is_fixed=True)
+      panel_embed = discord.Embed(
+          title='🎰 ガチャパネルを設置しました！',
+          description='下のボタンを押してガチャを引いてね！',
+          color=discord.Color.blue(),
       )
-      return
-    self.last_click[interaction.user.id] = now
-
-    bet = self.selected_bet
-    current_money = get_balance(interaction.user.id)
-
-    if current_money < bet:
-      await interaction.response.send_message(
-          f'⚠️ 所持金が足りません！（所持金: {current_money:,} まるもね / 賭け金:'
-          f' {bet:,} まるもね）',
-          ephemeral=True,
-      )
-      return
-
-    add_balance(interaction.user.id, -bet)
-
-    # カジノ勝敗 (50%で2倍獲得)
-    is_win = random.choice([True, False])
-
-    if is_win:
-      win_money = bet * 2
-      add_balance(interaction.user.id, win_money)
-      res_msg = f'🎉 **大勝利！！** 賭け金が2倍の **+{win_money:,} まるもね** になりました！'
-      color = discord.Color.green()
-    else:
-      res_msg = f'💀 **敗北…** 賭け金の **{bet:,} まるもね** を失いました。'
-      color = discord.Color.red()
-
-    new_balance = get_balance(interaction.user.id)
-
-    res_embed = discord.Embed(
-        title=f'🎲 {interaction.user.display_name} さんのカジノ結果',
-        description=f'{res_msg}\n👛 **現在の所持金:** {new_balance:,} まるもね',
-        color=color,
-    )
-    await interaction.response.send_message(embed=res_embed)
+      await interaction.channel.send(embed=panel_embed, view=new_view)
 
 
-# --- 6. スラッシュコマンド群 ---
+# --- 5. メインゲーム設定＆コマンド ---
 
 
-# ① スロットパネルコマンド
-@bot.tree.command(name='slot', description='スロットパネルを設置します')
-@app_commands.describe(kotei='Trueでチャンネル全体に固定設置、Falseで自分だけに表示')
-async def slot(interaction: discord.Interaction, kotei: bool = True):
-  view = SlotPanelView()
+@bot.tree.command(name='kazino', description='カジノパネルを設置します')
+@app_commands.describe(
+    fixed_panel='結果が出た後にパネルをメッセージの一番下に移動固定するか設定'
+)
+async def kazino(interaction: discord.Interaction, fixed_panel: bool = False):
+  view = CasinoPanelView(is_fixed=fixed_panel)
   embed = discord.Embed(
-      title='🎰 まるちき鯖 スロット設置パネル',
+      title='🎰 カジノパネルを設置しました！',
+      description='下の「かける」ボタンを押してゲームをスタートしてね！',
+      color=discord.Color.purple(),
+  )
+  await interaction.response.send_message(embed=embed, view=view)
+
+
+@bot.tree.command(name='slot', description='スロットパネルを設置します')
+@app_commands.describe(
+    fixed_panel='結果が出た後にパネルをメッセージの一番下に移動固定するか設定'
+)
+async def slot(interaction: discord.Interaction, fixed_panel: bool = False):
+  view = SlotPanelView(is_fixed=fixed_panel)
+  embed = discord.Embed(
+      title='🎰 スロットパネルを設置しました！',
       description=(
-          '【配当ルール】\n777: 100,000まるもね\n3つ一致: 50,000まるもね\n2つ一致:'
-          ' 5,000まるもね\n\n誰でもボタンを押して挑戦できます！'
+          '【配当表】\n7️⃣ 7️⃣ 7️⃣ : **100,000 まるもね**\n💎 💎 💎 :'
+          ' **50,000 まるもね**\n2つ一致 : **5,000 まるもね**\n\n🪙 プレイ料金: **1回'
+          ' 1,000 まるもね**'
       ),
       color=discord.Color.gold(),
   )
-  await interaction.response.send_message(
-      embed=embed, view=view, ephemeral=not kotei
-  )
+  await interaction.response.send_message(embed=embed, view=view)
 
 
-# ② ガチャパネルコマンド
 @bot.tree.command(name='gacha', description='ガチャパネルを設置します')
-@app_commands.describe(kotei='Trueでチャンネル全体に固定設置、Falseで自分だけに表示')
-async def gacha(interaction: discord.Interaction, kotei: bool = True):
-  view = GachaPanelView()
+@app_commands.describe(
+    fixed_panel='結果が出た後にパネルをメッセージの一番下に移動固定するか設定'
+)
+async def gacha(interaction: discord.Interaction, fixed_panel: bool = False):
+  view = GachaPanelView(is_fixed=fixed_panel)
   embed = discord.Embed(
-      title='✨ まるちき鯖 ガチャ設置パネル',
-      description='1回 300まるもね！誰でもボタンを押してガチャを引けます！',
+      title='🎰 ガチャパネルを設置しました！',
+      description='🪙 プレイ料金: **1回 300 まるもね**\n\n下のボタンを押して引いてね！',
       color=discord.Color.blue(),
   )
-  await interaction.response.send_message(
-      embed=embed, view=view, ephemeral=not kotei
-  )
+  await interaction.response.send_message(embed=embed, view=view)
 
 
-# ③ カジノパネルコマンド
-@bot.tree.command(name='kajino', description='カジノパネルを設置します')
-@app_commands.describe(kotei='Trueでチャンネル全体に固定設置、Falseで自分だけに表示')
-async def kajino(interaction: discord.Interaction, kotei: bool = True):
-  view = KajinoPanelView()
-  embed = discord.Embed(
-      title='🎲 まるちき鯖 カジノ設置パネル',
-      description=(
-          'ドロップダウンで賭け金を選び「かける」ボタンを押して勝負！勝てば2倍獲得！'
-      ),
-      color=discord.Color.purple(),
-  )
-  await interaction.response.send_message(
-      embed=embed, view=view, ephemeral=not kotei
-  )
-
-
-# ④ お仕事 (24時間制限付き)
 @bot.tree.command(
     name='work', description='お仕事をして「まるもね」を稼ぎます (24時間に1回)'
 )
@@ -362,13 +364,14 @@ async def work(interaction: discord.Interaction):
   now = datetime.datetime.now()
 
   if user_id in work_cooldowns:
-    next_time = work_cooldowns[user_id] + datetime.timedelta(hours=24)
+    next_time = work_cooldowns[user_id]
     if now < next_time:
-      diff = next_time - now
-      hours, remainder = divmod(diff.seconds, 3600)
+      remaining = next_time - now
+      hours, remainder = divmod(int(remaining.total_seconds()), 3600)
       minutes, seconds = divmod(remainder, 60)
       await interaction.response.send_message(
-          f'⏳ 次のお仕事まであと **{hours}時間{minutes}分{seconds}秒** 待ってください！',
+          f'⏳ まだお仕事できません！\n次回利用まであと **{hours}時間{minutes}分{seconds}秒**'
+          ' お待ちください。',
           ephemeral=True,
       )
       return
@@ -377,26 +380,36 @@ async def work(interaction: discord.Interaction):
       ('モンスターを倒した', 5000, 20000),
       ('ダンジョンから生還した', 10000, 50000),
       ('お店の店番をした', 1000, 5000),
+      ('畑仕事を手伝った', 500, 2000),
   ]
   job_name, min_earn, max_earn = random.choice(jobs)
   earned = random.randint(min_earn, max_earn)
 
   add_balance(user_id, earned)
-  work_cooldowns[user_id] = now
+  work_cooldowns[user_id] = now + datetime.timedelta(hours=24)
   current_money = get_balance(user_id)
 
   await interaction.response.send_message(
-      f'💼 お仕事「{job_name}」を頑張った！\n💰 報酬として **+{earned:,} まるもね**'
-      f' をゲット！🎉\n👛 現在の所持金: **{current_money:,} まるもね**'
+      f'💼 お仕事「{job_name}」を頑張った！\n💰 報酬: **+{earned:,} まるもね** 🎉\n👛'
+      f' 現在の所持金: **{current_money:,} まるもね**'
   )
 
 
-# ⑤ ランキング
+# --- 6. ランキングコマンド群 ---
 @bot.tree.command(
     name='marumone-okanemotirannkinngu',
     description='まるもね所持金ランキングTOP10を表示します',
 )
 async def okanemoti_ranking(interaction: discord.Interaction):
+  await show_ranking(interaction)
+
+
+@bot.tree.command(name='ranking', description='お金持ちランキングTOP10を表示します')
+async def ranking(interaction: discord.Interaction):
+  await show_ranking(interaction)
+
+
+async def show_ranking(interaction: discord.Interaction):
   if not user_balance:
     await interaction.response.send_message(
         '💰 まだデータが存在しません！', ephemeral=True
@@ -406,40 +419,24 @@ async def okanemoti_ranking(interaction: discord.Interaction):
   sorted_users = sorted(
       user_balance.items(), key=lambda item: item[1], reverse=True
   )
-
   ranking_text = ''
   medals = ['🥇', '🥈', '🥉']
 
-  for rank, (user_id, money) in enumerate(sorted_users[:10], start=1):
+  for rank, (u_id, money) in enumerate(sorted_users[:10], start=1):
     medal = medals[rank - 1] if rank <= 3 else f'**{rank}位**'
-    ranking_text += f'{medal} <@{user_id}> : **{money:,} まるもね**\n'
+    ranking_text += f'{medal} <@{u_id}> : **{money:,} まるもね**\n'
 
   embed = discord.Embed(
-      title='🏆 まるちき鯖 お金持ちランキング TOP10',
+      title='🏆 お金持ちランキング TOP10',
       description=ranking_text,
       color=discord.Color.gold(),
   )
-
   await interaction.response.send_message(embed=embed)
 
 
-# ⑥ 所持金確認
 @bot.tree.command(
-    name='balance',
-    description='自分または指定したメンバーの「まるもね」を確認します',
+    name='status', description='BotのPing値、RAM使用量、CPU情報等を確認します'
 )
-async def balance(
-    interaction: discord.Interaction, target: discord.Member = None
-):
-  user = target or interaction.user
-  money = get_balance(user.id)
-  await interaction.response.send_message(
-      f'👛 {user.mention} さんの現在の所持金: **{money:,} まるもね**'
-  )
-
-
-# ⑦ ステータス確認
-@bot.tree.command(name='status', description='BotのPing、RAM使用量等を確認します')
 async def status(interaction: discord.Interaction):
   latency = round(bot.latency * 1000)
   process = psutil.Process(os.getpid())
@@ -458,7 +455,7 @@ async def status(interaction: discord.Interaction):
   await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-# --- 7. ボット起動 ---
+# --- 7. 起動 ---
 if __name__ == '__main__':
   keep_alive()
   TOKEN = os.environ.get('DISCORD_BOT_TOKEN')
